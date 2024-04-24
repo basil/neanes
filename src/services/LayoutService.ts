@@ -1,3 +1,17 @@
+/* eslint-disable no-console */
+
+import {
+  Box,
+  breakLines,
+  forcedBreak,
+  Glue,
+  InputItem,
+  MAX_COST,
+  MaxAdjustmentExceededError,
+  PositionedItem,
+  positionItems,
+} from 'tex-linebreak';
+
 import {
   DropCapElement,
   ElementType,
@@ -16,6 +30,7 @@ import { Header } from '@/models/Header';
 import { measureBarAboveToLeft } from '@/models/NeumeReplacements';
 import {
   Fthora,
+  GorgonNeume,
   MeasureBar,
   Neume,
   NeumeSelection,
@@ -65,8 +80,53 @@ interface GetNoteWidthArgs {
   runningElaphronWidth: number;
   elaphronWidth: number;
 }
+
+interface ElementBox extends Box {
+  element: ScoreElement;
+}
+
+interface CompletedParagraph {
+  paragraph: InputItem[];
+  positions: PositionedItem[];
+}
+
+interface LayoutWorkspace {
+  pageSetup: PageSetup;
+
+  // The paragraph whose construction is currently in progress. Once a paragraph
+  // has been constructed, it is broken into lines and we begin constructing the
+  // next paragraph.
+  pendingParagraph: InputItem[];
+
+  // The next three values are offsets from within an idealized one-line
+  // paragraph of infinite width where no stretching or shrinking has been
+  // applied. They are used to calculate the widths of invisible boxes to
+  // prevent lyrics from being spaced too closely. They apply to the pending
+  // paragraph and are reset when the paragraph ends.
+  neumesEndPx: number;
+  lyricsEndPx: number;
+  melismaLyricsEndPx: number | null;
+
+  // Paragraphs that have been broken into lines and are ready to be placed onto
+  // a page (or multiple pages, if necessary). Once the lines of a paragraph
+  // have been placed onto page(s), that paragraph is removed from this list.
+  completedParagraphs: CompletedParagraph[];
+
+  // debug
+  loggingEnabled: boolean;
+}
+
 export class LayoutService {
   public static processPages(score: Score): Page[] {
+    const workspace: LayoutWorkspace = {
+      pageSetup: score.pageSetup,
+      pendingParagraph: [],
+      neumesEndPx: 0,
+      lyricsEndPx: -score.pageSetup.lyricsMinimumSpacing,
+      melismaLyricsEndPx: null,
+      completedParagraphs: [],
+      loggingEnabled: false,
+    };
     const pageSetup = score.pageSetup;
     const elements = score.staff.elements;
 
@@ -93,17 +153,12 @@ export class LayoutService {
 
     let page: Page = new Page();
 
-    let line: Line = new Line();
-
-    page.lines.push(line);
     pages.push(page);
 
     let currentPageHeightPx = 0;
-    let currentLineWidthPx = 0;
 
     let lastLineHeightPx = 0;
 
-    let lastElementWasLineBreak = false;
     let lastElementWasPageBreak = false;
 
     // First, calculate some constants that will
@@ -227,65 +282,72 @@ export class LayoutService {
     this.processFooter(score.footers.even, pageSetup, neumeHeight);
     this.processFooter(score.footers.firstPage, pageSetup, neumeHeight);
 
-    let currentLyricsEndPx =
-      pageSetup.leftMargin - pageSetup.lyricsMinimumSpacing;
+    const standardGlue: Glue = {
+      type: 'glue',
+      width: pageSetup.neumeDefaultSpacing,
+      stretch: pageSetup.neumeDefaultSpacing * 1.5,
+      shrink: pageSetup.neumeDefaultSpacing * 0.5,
+    };
 
-    let currentMelismaLyricsEndPx: number | null = null;
+    const martyriaGlue: Glue = {
+      type: 'glue',
+      width: pageSetup.neumeDefaultSpacing,
+      stretch: pageSetup.neumeDefaultSpacing * 3,
+      shrink: pageSetup.neumeDefaultSpacing * 0.5,
+    };
 
-    let elementWithTrailingSpace: ScoreElement | null = null;
+    const rightMartyriaGlue: Glue = {
+      type: 'glue',
+      width: pageSetup.neumeDefaultSpacing,
+      stretch: MAX_COST,
+      shrink: pageSetup.neumeDefaultSpacing * 0.5,
+    };
 
     for (let i = 0; i < elements.length; i++) {
-      const element = elements[i];
+      let lineBreak: boolean = elements[i].lineBreak || elements[i].pageBreak;
+      let lineBreakType: LineBreakType =
+        elements[i].lineBreakType || LineBreakType.Left;
 
-      let elementWidthPx = 0;
-      let elementWidthWithLyricsPx = 0;
-      let additionalWidth = 0;
+      switch (elements[i].elementType) {
+        case ElementType.TextBox: {
+          const textBoxElement = elements[i] as TextBoxElement;
 
-      const currentPageNumber = pages.length;
-
-      const header = score.getHeaderForPage(currentPageNumber);
-      const footer = score.getFooterForPage(currentPageNumber);
-
-      // Currently, headers and footers may only contain a single
-      // text box.
-      const headerHeightPx =
-        header != null ? (header.elements[0] as TextBoxElement).height : 0;
-      const footerHeightPx =
-        footer != null ? (footer.elements[0] as TextBoxElement).height : 0;
-
-      const extraHeaderHeightPx = Math.max(
-        0,
-        headerHeightPx - (pageSetup.topMargin - pageSetup.headerMargin),
-      );
-
-      const extraFooterHeightPx = Math.max(
-        0,
-        footerHeightPx - (pageSetup.bottomMargin - pageSetup.footerMargin),
-      );
-
-      const innerPageHeight =
-        pageSetup.innerPageHeight - extraHeaderHeightPx - extraFooterHeightPx;
-
-      switch (element.elementType) {
-        case ElementType.TextBox:
-          elementWidthPx = LayoutService.processTextBoxElement(
-            element as TextBoxElement,
+          const elementWidthPx = LayoutService.processTextBoxElement(
+            textBoxElement,
             pageSetup,
             neumeHeight,
           );
-          break;
-        case ElementType.ImageBox:
-          {
-            const imageBox = element as ImageBoxElement;
-            elementWidthPx = imageBox.inline
-              ? imageBox.imageWidth
-              : pageSetup.innerPageWidth;
-          }
-          break;
-        case ElementType.ModeKey: {
-          const modeKeyElement = element as ModeKeyElement;
+          this.addLyricBox(elementWidthPx, workspace);
+          this.addBox(elementWidthPx, textBoxElement, workspace);
 
-          elementWidthPx = pageSetup.innerPageWidth;
+          this.addGlue(standardGlue, workspace);
+
+          if (!textBoxElement.inline && !lineBreak) {
+            lineBreak = true;
+            lineBreakType = LineBreakType.Justify;
+          }
+
+          break;
+        }
+        case ElementType.ImageBox: {
+          const imageBoxElement = elements[i] as ImageBoxElement;
+
+          const elementWidthPx = imageBoxElement.inline
+            ? imageBoxElement.imageWidth
+            : pageSetup.innerPageWidth;
+          this.addLyricBox(elementWidthPx, workspace);
+          this.addBox(elementWidthPx, imageBoxElement, workspace);
+
+          this.addGlue(standardGlue, workspace);
+          if (!imageBoxElement.inline && !lineBreak) {
+            lineBreak = true;
+            lineBreakType = LineBreakType.Justify;
+          }
+
+          break;
+        }
+        case ElementType.ModeKey: {
+          const modeKeyElement = elements[i] as ModeKeyElement;
 
           // Compute properties
           modeKeyElement.computedFontFamily = pageSetup.neumeDefaultFontFamily;
@@ -311,18 +373,112 @@ export class LayoutService {
             TextMeasurementService.getFontHeight(
               `${modeKeyElement.computedFontSize}px ${modeKeyElement.computedFontFamily}`,
             ) + modeKeyElement.computedHeightAdjustment;
+
+          this.addBox(pageSetup.innerPageWidth, modeKeyElement, workspace);
+
+          this.addGlue(standardGlue, workspace);
+
+          if (!lineBreak) {
+            lineBreak = true;
+            lineBreakType = LineBreakType.Justify;
+          }
+
           break;
         }
         case ElementType.Note: {
-          const noteElement = element as NoteElement;
+          const noteElement = elements[i] as NoteElement;
 
-          elementWidthPx = this.getNoteWidth(
+          const elementWidthPx = this.getNoteWidth(
             noteElement,
             pageSetup,
             noteWidthArgs,
           );
 
-          const nextElement = elements[i + 1];
+          // Special case when lyrics are longer than the neume.
+          // This shifts the note element to the right to account for the
+          // extra length of the lyrics to the left of the neume.
+          // Thus, the lyrics start at the (previous) x position instead of the neume.
+
+          const lyricsStart =
+            workspace.neumesEndPx +
+            noteElement.lyricsHorizontalOffset / 2 +
+            noteElement.neumeWidth / 2 -
+            noteElement.lyricsWidth / 2;
+
+          const spacing = pageSetup.lyricsMinimumSpacing;
+
+          // Ensure that there is at least a small width between the start of
+          // this note's lyrics and the end of the previous note's lyrics
+          if (
+            workspace.melismaLyricsEndPx != null &&
+            (!noteElement.isMelisma || noteElement.isMelismaStart) &&
+            lyricsStart <= workspace.melismaLyricsEndPx + spacing
+          ) {
+            const adjustment =
+              workspace.melismaLyricsEndPx - lyricsStart + spacing;
+            workspace.pendingParagraph.push({
+              type: 'box',
+              width: adjustment,
+            });
+          } else if (lyricsStart <= workspace.lyricsEndPx + spacing) {
+            const adjustment = workspace.lyricsEndPx - lyricsStart + spacing;
+            workspace.pendingParagraph.push({
+              type: 'box',
+              width: adjustment,
+            });
+          }
+
+          const lyricsEnd =
+            workspace.neumesEndPx +
+            noteElement.lyricsHorizontalOffset / 2 +
+            noteElement.neumeWidth / 2 +
+            noteElement.lyricsWidth / 2;
+
+          const neumeEnd =
+            workspace.neumesEndPx +
+            noteElement.neumeWidth +
+            pageSetup.neumeDefaultSpacing;
+
+          workspace.lyricsEndPx = noteElement.isMelismaStart
+            ? neumeEnd
+            : noteElement.spaceAfter + lyricsEnd;
+
+          if (noteElement.isMelismaStart && noteElement.isHyphen) {
+            const widthOfHyphenForThisElement =
+              noteElement.lyricsUseDefaultStyle
+                ? widthOfHyphen
+                : this.getTextWidthFromCache(
+                    textWidthCache,
+                    noteElement,
+                    pageSetup,
+                    '-',
+                  );
+
+            workspace.melismaLyricsEndPx =
+              noteElement.spaceAfter + lyricsEnd + widthOfHyphenForThisElement;
+          } else if (noteElement.isMelismaStart) {
+            const widthOfUnderscoreForThisElement =
+              noteElement.lyricsUseDefaultStyle
+                ? widthOfUnderscore
+                : this.getTextWidthFromCache(
+                    textWidthCache,
+                    noteElement,
+                    pageSetup,
+                    '_',
+                  );
+
+            workspace.melismaLyricsEndPx =
+              noteElement.spaceAfter +
+              lyricsEnd +
+              widthOfUnderscoreForThisElement;
+          } else if (!noteElement.isMelisma) {
+            workspace.melismaLyricsEndPx = null;
+          }
+
+          this.addBox(elementWidthPx, noteElement, workspace);
+
+          const nextElement: ScoreElement | null =
+            i + 1 < elements.length ? elements[i + 1] : null;
 
           // Keep note and martyria together
           // and keep two tied notes together
@@ -339,48 +495,185 @@ export class LayoutService {
             ties.includes(noteElement.vocalExpressionNeume!) ||
             ties.includes(noteElement.tie!);
 
-          if (
-            nextElement != null &&
-            nextElement.elementType === ElementType.Martyria
-          ) {
-            additionalWidth =
-              this.getMartyriaWidth(nextElement as MartyriaElement, pageSetup) +
-              pageSetup.neumeDefaultSpacing;
-          } else if (
-            noteTied &&
-            nextElement?.elementType === ElementType.Note
-          ) {
-            additionalWidth =
-              this.getNoteWidth(
-                nextElement as NoteElement,
-                pageSetup,
-                noteWidthArgs,
-              ) + pageSetup.neumeDefaultSpacing;
+          const kentemata = [
+            QuantitativeNeume.Kentemata,
+            QuantitativeNeume.KentemataPlusOligon,
+          ];
+
+          const beatStealing = [
+            QuantitativeNeume.OligonPlusRunningElaphronPlusKentemata,
+            QuantitativeNeume.PetastiPlusRunningElaphron,
+            QuantitativeNeume.RunningElaphron,
+          ];
+
+          const beatStealingWithGorgon = [
+            QuantitativeNeume.Apostrophos,
+            QuantitativeNeume.DoubleHamili,
+            QuantitativeNeume.DoubleHamiliApostrofos,
+            QuantitativeNeume.DoubleHamiliElafron,
+            QuantitativeNeume.DoubleHamiliElafronApostrofos,
+            QuantitativeNeume.Elaphron,
+            QuantitativeNeume.ElaphronPlusApostrophos,
+            QuantitativeNeume.Hamili,
+            QuantitativeNeume.HamiliPlusApostrophos,
+            QuantitativeNeume.HamiliPlusElaphron,
+            QuantitativeNeume.HamiliPlusElaphronPlusApostrophos,
+            QuantitativeNeume.Hyporoe,
+            QuantitativeNeume.Ison,
+            QuantitativeNeume.Oligon,
+            QuantitativeNeume.OligonKentimaDoubleYpsiliLeft,
+            QuantitativeNeume.OligonKentimaDoubleYpsiliRight,
+            QuantitativeNeume.OligonKentimataDoubleYpsili,
+            QuantitativeNeume.OligonKentimataTripleYpsili,
+            QuantitativeNeume.OligonKentimaTripleYpsili,
+            QuantitativeNeume.OligonPlusApostrophos,
+            QuantitativeNeume.OligonPlusDoubleHypsili,
+            QuantitativeNeume.OligonPlusElaphron,
+            QuantitativeNeume.OligonPlusElaphronPlusApostrophos,
+            QuantitativeNeume.OligonPlusHamili,
+            QuantitativeNeume.OligonPlusHyporoe,
+            QuantitativeNeume.OligonPlusHyporoePlusKentemata,
+            QuantitativeNeume.OligonPlusHypsiliLeft,
+            QuantitativeNeume.OligonPlusHypsiliPlusKentimaHorizontal,
+            QuantitativeNeume.OligonPlusHypsiliPlusKentimaVertical,
+            QuantitativeNeume.OligonPlusHypsiliRight,
+            QuantitativeNeume.OligonPlusIson,
+            QuantitativeNeume.OligonPlusKentima,
+            QuantitativeNeume.OligonPlusKentimaAbove,
+            QuantitativeNeume.OligonPlusKentimaBelow,
+            QuantitativeNeume.OligonTripleYpsili,
+            QuantitativeNeume.Petasti,
+            QuantitativeNeume.PetastiDoubleHamili,
+            QuantitativeNeume.PetastiDoubleHamiliApostrofos,
+            QuantitativeNeume.PetastiHamili,
+            QuantitativeNeume.PetastiHamiliApostrofos,
+            QuantitativeNeume.PetastiHamiliElafron,
+            QuantitativeNeume.PetastiHamiliElafronApostrofos,
+            QuantitativeNeume.PetastiKentimaDoubleYpsiliLeft,
+            QuantitativeNeume.PetastiKentimaDoubleYpsiliRight,
+            QuantitativeNeume.PetastiKentimataDoubleYpsili,
+            QuantitativeNeume.PetastiKentimataTripleYpsili,
+            QuantitativeNeume.PetastiKentimaTripleYpsili,
+            QuantitativeNeume.PetastiPlusApostrophos,
+            QuantitativeNeume.PetastiPlusDoubleHypsili,
+            QuantitativeNeume.PetastiPlusElaphron,
+            QuantitativeNeume.PetastiPlusElaphronPlusApostrophos,
+            QuantitativeNeume.PetastiPlusHyporoe,
+            QuantitativeNeume.PetastiPlusHypsiliLeft,
+            QuantitativeNeume.PetastiPlusHypsiliPlusKentimaHorizontal,
+            QuantitativeNeume.PetastiPlusHypsiliPlusKentimaVertical,
+            QuantitativeNeume.PetastiPlusHypsiliRight,
+            QuantitativeNeume.PetastiPlusKentimaAbove,
+            QuantitativeNeume.PetastiPlusOligon,
+            QuantitativeNeume.PetastiTripleYpsili,
+            QuantitativeNeume.PetastiWithIson,
+            QuantitativeNeume.TripleHamili,
+            QuantitativeNeume.VareiaDotted,
+            QuantitativeNeume.VareiaDotted2,
+            QuantitativeNeume.VareiaDotted3,
+            QuantitativeNeume.VareiaDotted4,
+          ];
+
+          const gorgonNeumes = [
+            GorgonNeume.Argon,
+            GorgonNeume.Diargon,
+            GorgonNeume.Gorgon_Bottom,
+            GorgonNeume.GorgonDottedLeft,
+            GorgonNeume.GorgonDottedRight,
+            GorgonNeume.Gorgon_Top,
+            GorgonNeume.Hemiolion,
+          ];
+
+          const beatStealingWithSecondaryGorgon = [
+            QuantitativeNeume.OligonPlusHyporoePlusKentemata,
+          ];
+
+          const secondaryGorgonNeumes = [
+            GorgonNeume.GorgonDottedLeftSecondary,
+            GorgonNeume.GorgonDottedRightSecondary,
+            GorgonNeume.GorgonSecondary,
+          ];
+
+          // TODO handle digorgon/trigorgon
+
+          if (nextElement?.elementType === ElementType.Martyria) {
+            this.preventBreak(workspace);
+          } else if (nextElement?.elementType === ElementType.Note) {
+            const nextNoteElement = nextElement as NoteElement;
+            if (noteTied || noteElement.vareia) {
+              this.preventBreak(workspace);
+            } else if (
+              kentemata.includes(nextNoteElement.quantitativeNeume) ||
+              beatStealing.includes(nextNoteElement.quantitativeNeume) ||
+              (beatStealingWithGorgon.includes(
+                nextNoteElement.quantitativeNeume,
+              ) &&
+                nextNoteElement.gorgonNeume &&
+                gorgonNeumes.includes(nextNoteElement.gorgonNeume)) ||
+              (beatStealingWithSecondaryGorgon.includes(
+                nextNoteElement.quantitativeNeume,
+              ) &&
+                nextNoteElement.secondaryGorgonNeume &&
+                secondaryGorgonNeumes.includes(
+                  nextNoteElement.secondaryGorgonNeume,
+                ))
+            ) {
+              this.stronglyDiscourageBreak(workspace);
+            }
           }
+
+          this.addGlue(standardGlue, workspace);
+
+          noteElement.computedMeasureBarLeft = null;
+          noteElement.computedMeasureBarRight = null;
+
           break;
         }
         case ElementType.Martyria: {
-          const martyriaElement = element as MartyriaElement;
+          const martyriaElement = elements[i] as MartyriaElement;
 
-          elementWidthPx = this.getMartyriaWidth(martyriaElement, pageSetup);
+          this.updateGlue(
+            martyriaElement.alignRight ? rightMartyriaGlue : martyriaGlue,
+            workspace,
+          );
+
+          const elementWidthPx = this.getMartyriaWidth(
+            martyriaElement,
+            pageSetup,
+          );
+          this.addLyricBox(elementWidthPx, workspace);
+          this.addBox(elementWidthPx, martyriaElement, workspace);
+
+          this.addGlue(martyriaGlue, workspace);
+
+          if (martyriaElement.alignRight && !lineBreak) {
+            lineBreak = true;
+            lineBreakType = LineBreakType.Justify;
+          }
+
           break;
         }
         case ElementType.Tempo: {
-          const tempoElement = element as TempoElement;
+          const tempoElement = elements[i] as TempoElement;
           const temoMapping = NeumeMappingService.getMapping(
             tempoElement.neume,
           )!;
 
-          elementWidthPx =
+          const elementWidthPx =
             TextMeasurementService.getTextWidth(
               temoMapping.text,
               `${pageSetup.neumeDefaultFontSize}px ${pageSetup.neumeDefaultFontFamily}`,
             ) + tempoElement.spaceAfter;
           tempoElement.neumeWidth = elementWidthPx;
+          this.addLyricBox(elementWidthPx, workspace);
+          this.addBox(elementWidthPx, tempoElement, workspace);
+
+          this.addGlue(standardGlue, workspace);
+
           break;
         }
         case ElementType.DropCap: {
-          const dropCapElement = element as DropCapElement;
+          const dropCapElement = elements[i] as DropCapElement;
 
           dropCapElement.computedFontFamily = dropCapElement.useDefaultStyle
             ? pageSetup.dropCapDefaultFontFamily
@@ -410,357 +703,348 @@ export class LayoutService {
             ? pageSetup.dropCapDefaultLineHeight
             : dropCapElement.lineHeight;
 
-          elementWidthPx = TextMeasurementService.getTextWidth(
+          const elementWidthPx = TextMeasurementService.getTextWidth(
             dropCapElement.content,
             dropCapElement.computedFont,
           );
+
+          this.addLyricBox(elementWidthPx, workspace);
+          this.addBox(elementWidthPx, dropCapElement, workspace);
+
+          this.addGlue(standardGlue, workspace);
+
           break;
         }
         case ElementType.Empty: {
-          const emptyElement = element as EmptyElement;
-          elementWidthPx = emptyElementWidth;
+          if (i !== elements.length - 1) {
+            throw new Error('Unexpected empty element at index ' + i);
+          }
+
+          const emptyElement = elements[i] as EmptyElement;
           emptyElement.height = neumeHeight;
+
+          this.addLyricBox(emptyElementWidth, workspace);
+          this.addBox(emptyElementWidth, emptyElement, workspace);
+
+          this.addGlue(standardGlue, workspace);
+
+          lineBreak = true;
+
           break;
         }
         default:
           console.warn(
-            `Unhandled element type in layout service: ${element.elementType}`,
+            `Unhandled element type in layout service: ${elements[i].elementType}`,
           );
       }
 
-      if (element.elementType === ElementType.Note) {
-        const noteElement = element as NoteElement;
-
-        elementWidthWithLyricsPx = Math.max(
-          elementWidthPx,
-          noteElement.lyricsWidth,
-        );
-      } else {
-        elementWidthWithLyricsPx = elementWidthPx;
-      }
-
-      if (element.elementType === ElementType.Note) {
-        const noteElement = element as NoteElement;
-        noteElement.computedMeasureBarLeft = null;
-        noteElement.computedMeasureBarRight = null;
-      }
-
-      // Check if we need a new line
-      if (
-        currentLineWidthPx + elementWidthWithLyricsPx + additionalWidth >
-          pageSetup.innerPageWidth ||
-        lastElementWasLineBreak
-      ) {
-        if (element.elementType === ElementType.Note) {
-          const noteElement = element as NoteElement;
-          const previousElement = elements[i - 1];
-          if (previousElement?.elementType === ElementType.Note) {
-            // If the new line starts with a left measure, apply it to the right
-            // of the previous line
-            const previousNoteElement = previousElement as NoteElement;
-            if (
-              noteElement.measureBarLeft &&
-              (noteElement.elementType === ElementType.Martyria ||
-                !noteElement.measureBarLeft.endsWith('Above'))
-            ) {
-              previousNoteElement.computedMeasureBarRight =
-                noteElement.measureBarLeft;
-            }
-          } else if (previousElement?.elementType === ElementType.Martyria) {
-            // If the previous line ends with a martyria with a barline, apply
-            // it to the left of the new line
-            const previousMartyriaElement = previousElement as MartyriaElement;
-            const normalizedMeasureBar =
-              previousMartyriaElement.measureBarLeft?.endsWith('Above')
-                ? measureBarAboveToLeft.get(
-                    previousMartyriaElement.measureBarLeft,
-                  )
-                : previousMartyriaElement.measureBarRight;
-            if (normalizedMeasureBar) {
-              noteElement.computedMeasureBarLeft = normalizedMeasureBar;
-            }
+      // A line break is implied before a block text box, image box, or mode key
+      // element.
+      {
+        const nextElement: ScoreElement | null =
+          i + 1 < elements.length ? elements[i + 1] : null;
+        if (nextElement?.elementType === ElementType.TextBox) {
+          const textBoxElement = nextElement as TextBoxElement;
+          if (!textBoxElement.inline) {
+            lineBreak = true;
           }
-        } else if (element.elementType === ElementType.Martyria) {
-          // If the new line starts with a left measure, apply it to the right
-          // of the previous line
-          const martyriaElement = element as MartyriaElement;
-          const previousElement = elements[i - 1];
-          if (previousElement?.elementType === ElementType.Note) {
-            const previousNoteElement = previousElement as NoteElement;
-            const normalizedMeasureBar =
-              martyriaElement.measureBarLeft?.endsWith('Above')
-                ? measureBarAboveToLeft.get(martyriaElement.measureBarLeft)
-                : martyriaElement.measureBarLeft;
-            if (normalizedMeasureBar) {
-              previousNoteElement.computedMeasureBarRight =
-                normalizedMeasureBar;
-            }
+        } else if (nextElement?.elementType === ElementType.ImageBox) {
+          const imageBoxElement = nextElement as ImageBoxElement;
+          if (!imageBoxElement.inline) {
+            lineBreak = true;
           }
+        } else if (nextElement?.elementType === ElementType.ModeKey) {
+          // TODO support inline mode keys
+          lineBreak = true;
         }
+      }
 
-        line = new Line();
+      // Invariant: After processing each element, there should be trailing
+      // glue at the end of the paragraph (either the standard glue or a
+      // martyria glue), even if the element has an (explicit or implicit) line
+      // break and the paragraph is about to end. In the latter case, we will
+      // remove the trailing glue in endParagraph() and replace it with
+      // finishing glue.
+      if (lineBreak) {
+        this.endParagraph(lineBreakType, workspace);
+      }
 
-        page.lines.push(line);
+      while (workspace.completedParagraphs.length > 0) {
+        const completedParagraph = workspace.completedParagraphs.shift()!;
 
-        // Calculate the current page height
-        currentPageHeightPx = 0;
+        // This variable keeps track of the line index within the completed
+        // paragraph. We assume that a page starts with zero lines and add each
+        // line from the completed paragraph until the page fills up, at which
+        // point we continue adding lines to the next page.
+        let lineIndex = -1;
 
-        for (const line of page.lines) {
-          let height = 0;
-
-          if (
-            line.elements.some(
-              (x) =>
-                x.elementType === ElementType.TextBox &&
-                !(x as TextBoxElement).inline,
-            )
-          ) {
-            const textbox = line.elements.find(
-              (x) => x.elementType === ElementType.TextBox,
-            ) as TextBoxElement;
-            height = textbox.height;
-          } else if (
-            line.elements.some((x) => x.elementType === ElementType.ModeKey)
-          ) {
-            const modekey = line.elements.find(
-              (x) => x.elementType === ElementType.ModeKey,
-            ) as ModeKeyElement;
-            height = modekey.height;
-          } else if (
-            line.elements.some((x) => x.elementType === ElementType.ImageBox)
-          ) {
-            const imageBox = line.elements.find(
-              (x) => x.elementType === ElementType.ImageBox,
-            ) as ImageBoxElement;
-            height = imageBox.inline
-              ? Math.max(imageBox.imageHeight, neumeHeight)
-              : imageBox.imageHeight;
-          } else if (
-            line.elements.some((x) =>
-              [
-                ElementType.Martyria,
-                ElementType.Note,
-                ElementType.Tempo,
-                ElementType.DropCap,
-                ElementType.Empty,
-              ].includes(x.elementType),
-            )
-          ) {
-            height = Math.max(
-              lyricsVerticalOffset + lyricHeight,
-              pageSetup.lineHeight,
-            );
-          } else {
-            height = pageSetup.lineHeight;
+        for (const position of completedParagraph.positions) {
+          const positionedItem = completedParagraph.paragraph[position.item];
+          if (positionedItem.type !== 'box') {
+            // No need to position glue items
+            continue;
           }
 
-          currentPageHeightPx += height;
+          // Check if we need a new line
+          if (position.line > lineIndex) {
+            page.lines.push(new Line());
 
-          if (page.lines.indexOf(line) === page.lines.length - 1) {
-            lastLineHeightPx = height;
-          }
-        }
+            lineIndex += 1;
 
-        currentLineWidthPx = 0;
-        currentLyricsEndPx =
-          pageSetup.leftMargin - pageSetup.lyricsMinimumSpacing;
-        currentMelismaLyricsEndPx = null;
+            // Calculate the current page height
+            currentPageHeightPx = 0;
 
-        if (elementWithTrailingSpace != null) {
-          elementWithTrailingSpace.width -= pageSetup.neumeDefaultSpacing;
-          elementWithTrailingSpace = null;
-        }
-      }
+            for (const line of page.lines) {
+              let height = 0;
 
-      // Check if we need a new page
-      if (currentPageHeightPx > innerPageHeight || lastElementWasPageBreak) {
-        page = new Page();
-
-        line = new Line();
-
-        page.lines.push(line);
-        pages.push(page);
-
-        currentPageHeightPx = 0;
-        currentLineWidthPx = 0;
-        lastLineHeightPx = 0;
-        currentLyricsEndPx =
-          pageSetup.leftMargin - pageSetup.lyricsMinimumSpacing;
-        currentMelismaLyricsEndPx = null;
-
-        if (elementWithTrailingSpace != null) {
-          elementWithTrailingSpace.width -= pageSetup.neumeDefaultSpacing;
-          elementWithTrailingSpace = null;
-        }
-      }
-
-      element.x = pageSetup.leftMargin + currentLineWidthPx;
-      element.y =
-        pageSetup.topMargin +
-        extraHeaderHeightPx +
-        currentPageHeightPx -
-        lastLineHeightPx;
-      element.width = elementWidthPx;
-
-      element.line = page.lines.length;
-      element.page = pages.length;
-
-      // Special logic to adjust drop caps.
-      // This aligns the bottom of the drop cap with
-      // the bottom of the lyrics.
-      if (element.elementType === ElementType.DropCap) {
-        const distanceFromTopToBottomOfLyrics =
-          lyricsVerticalOffset + pageSetup.lyricsDefaultFontSize;
-
-        const dropCapElement = element as DropCapElement;
-
-        const fontHeight = TextMeasurementService.getFontHeight(
-          dropCapElement.computedFont,
-        );
-        const fontBoundingBoxDescent =
-          TextMeasurementService.getFontBoundingBoxDescent(
-            dropCapElement.computedFont,
-          );
-        const adjustment =
-          fontHeight - distanceFromTopToBottomOfLyrics - fontBoundingBoxDescent;
-
-        element.y -= adjustment;
-      }
-
-      // Special case when lyrics are longer than the neume.
-      // This shifts the note element to the right to account for the
-      // extra length of the lyrics to the left of the neume.
-      // Thus, the lyrics start at the (previous) x position instead of the neume.
-      if (element.elementType === ElementType.Note) {
-        const noteElement = element as NoteElement;
-
-        const lyricsStart =
-          noteElement.x +
-          noteElement.lyricsHorizontalOffset / 2 +
-          noteElement.neumeWidth / 2 -
-          noteElement.lyricsWidth / 2;
-
-        const spacing = pageSetup.lyricsMinimumSpacing;
-
-        // Ensure that there is at least a small width between the start of
-        // this notes lyrics and the end of the previous note's lyrics
-        if (
-          currentMelismaLyricsEndPx != null &&
-          (!noteElement.isMelisma || noteElement.isMelismaStart) &&
-          lyricsStart <= currentMelismaLyricsEndPx + spacing
-        ) {
-          const adjustment = currentMelismaLyricsEndPx - lyricsStart + spacing;
-          element.x += adjustment;
-          element.width += adjustment;
-          elementWidthPx += adjustment;
-        } else if (lyricsStart <= currentLyricsEndPx + spacing) {
-          const adjustment = currentLyricsEndPx - lyricsStart + spacing;
-          element.x += adjustment;
-          element.width += adjustment;
-          elementWidthPx += adjustment;
-        }
-
-        const lyricsEnd =
-          noteElement.x +
-          noteElement.lyricsHorizontalOffset / 2 +
-          noteElement.neumeWidth / 2 +
-          noteElement.lyricsWidth / 2;
-
-        const neumeEnd =
-          noteElement.x +
-          noteElement.neumeWidth +
-          pageSetup.neumeDefaultSpacing;
-
-        currentLyricsEndPx = noteElement.isMelismaStart
-          ? neumeEnd
-          : noteElement.spaceAfter + lyricsEnd;
-
-        if (noteElement.isMelismaStart && noteElement.isHyphen) {
-          const widthOfHyphenForThisElement = noteElement.lyricsUseDefaultStyle
-            ? widthOfHyphen
-            : this.getTextWidthFromCache(
-                textWidthCache,
-                noteElement,
-                pageSetup,
-                '-',
-              );
-
-          currentMelismaLyricsEndPx =
-            noteElement.spaceAfter + lyricsEnd + widthOfHyphenForThisElement;
-        } else if (noteElement.isMelismaStart) {
-          const widthOfUnderscoreForThisElement =
-            noteElement.lyricsUseDefaultStyle
-              ? widthOfUnderscore
-              : this.getTextWidthFromCache(
-                  textWidthCache,
-                  noteElement,
-                  pageSetup,
-                  '_',
+              if (
+                line.elements.some(
+                  (x) =>
+                    x.elementType === ElementType.TextBox &&
+                    !(x as TextBoxElement).inline,
+                )
+              ) {
+                const textbox = line.elements.find(
+                  (x) => x.elementType === ElementType.TextBox,
+                ) as TextBoxElement;
+                height = textbox.height;
+              } else if (
+                line.elements.some((x) => x.elementType === ElementType.ModeKey)
+              ) {
+                const modekey = line.elements.find(
+                  (x) => x.elementType === ElementType.ModeKey,
+                ) as ModeKeyElement;
+                height = modekey.height;
+              } else if (
+                line.elements.some(
+                  (x) => x.elementType === ElementType.ImageBox,
+                )
+              ) {
+                const imageBox = line.elements.find(
+                  (x) => x.elementType === ElementType.ImageBox,
+                ) as ImageBoxElement;
+                height = imageBox.inline
+                  ? Math.max(imageBox.imageHeight, neumeHeight)
+                  : imageBox.imageHeight;
+              } else if (
+                line.elements.some((x) =>
+                  [
+                    ElementType.Martyria,
+                    ElementType.Note,
+                    ElementType.Tempo,
+                    ElementType.DropCap,
+                    ElementType.Empty,
+                  ].includes(x.elementType),
+                )
+              ) {
+                height = Math.max(
+                  lyricsVerticalOffset + lyricHeight,
+                  pageSetup.lineHeight,
                 );
+              } else {
+                height = pageSetup.lineHeight;
+              }
 
-          currentMelismaLyricsEndPx =
-            noteElement.spaceAfter +
-            lyricsEnd +
-            widthOfUnderscoreForThisElement;
-        } else if (!noteElement.isMelisma) {
-          currentMelismaLyricsEndPx = null;
+              currentPageHeightPx += height;
+
+              if (page.lines.indexOf(line) === page.lines.length - 1) {
+                lastLineHeightPx = height;
+              }
+            }
+          }
+
+          // Calculate the height of the headers/footers of the current page.
+          // Note that we may need to recalculate these shortly if we need to
+          // start a new page. (This should probably be refactored to eliminate
+          // the duplicate code.)
+          let header = score.getHeaderForPage(pages.length);
+          let footer = score.getFooterForPage(pages.length);
+
+          // Currently, headers and footers may only contain a single
+          // text box.
+          let headerHeightPx =
+            header != null ? (header.elements[0] as TextBoxElement).height : 0;
+          let footerHeightPx =
+            footer != null ? (footer.elements[0] as TextBoxElement).height : 0;
+
+          let extraHeaderHeightPx = Math.max(
+            0,
+            headerHeightPx - (pageSetup.topMargin - pageSetup.headerMargin),
+          );
+          let extraFooterHeightPx = Math.max(
+            0,
+            footerHeightPx - (pageSetup.bottomMargin - pageSetup.footerMargin),
+          );
+
+          const innerPageHeight =
+            pageSetup.innerPageHeight -
+            extraHeaderHeightPx -
+            extraFooterHeightPx;
+
+          // Check if we need a new page
+          if (
+            currentPageHeightPx > innerPageHeight ||
+            lastElementWasPageBreak
+          ) {
+            const lastLine = page.lines.pop()!;
+
+            page = new Page();
+
+            page.lines.push(lastLine);
+
+            pages.push(page);
+
+            currentPageHeightPx = 0;
+            lastLineHeightPx = 0;
+
+            // Recalculate the height of the headers/footers of the new page, as
+            // we will need this information shortly to start placing objects on
+            // the new page.
+            header = score.getHeaderForPage(pages.length);
+            footer = score.getFooterForPage(pages.length);
+
+            headerHeightPx =
+              header != null
+                ? (header.elements[0] as TextBoxElement).height
+                : 0;
+            footerHeightPx =
+              footer != null
+                ? (footer.elements[0] as TextBoxElement).height
+                : 0;
+
+            extraHeaderHeightPx = Math.max(
+              0,
+              headerHeightPx - (pageSetup.topMargin - pageSetup.headerMargin),
+            );
+            extraFooterHeightPx = Math.max(
+              0,
+              footerHeightPx -
+                (pageSetup.bottomMargin - pageSetup.footerMargin),
+            );
+          }
+
+          const element =
+            'element' in positionedItem
+              ? (positionedItem as ElementBox).element
+              : null;
+          if (!element) {
+            continue;
+          }
+
+          element.x = pageSetup.leftMargin + position.xOffset;
+          element.y =
+            pageSetup.topMargin +
+            extraHeaderHeightPx +
+            currentPageHeightPx -
+            lastLineHeightPx;
+          element.width = position.width;
+
+          element.line = page.lines.length;
+          element.page = pages.length;
+
+          // Special logic to adjust drop caps.
+          // This aligns the bottom of the drop cap with
+          // the bottom of the lyrics.
+          if (element.elementType === ElementType.DropCap) {
+            const distanceFromTopToBottomOfLyrics =
+              lyricsVerticalOffset + pageSetup.lyricsDefaultFontSize;
+
+            const dropCapElement = element as DropCapElement;
+
+            const fontHeight = TextMeasurementService.getFontHeight(
+              dropCapElement.computedFont,
+            );
+            const fontBoundingBoxDescent =
+              TextMeasurementService.getFontBoundingBoxDescent(
+                dropCapElement.computedFont,
+              );
+            const adjustment =
+              fontHeight -
+              distanceFromTopToBottomOfLyrics -
+              fontBoundingBoxDescent;
+
+            element.y -= adjustment;
+          }
+
+          const curLine = page.lines[page.lines.length - 1];
+          let prevLine =
+            page.lines.length > 1 ? page.lines[page.lines.length - 2] : null;
+          if (prevLine === null && pages.length > 1) {
+            const prevPage = pages[pages.length - 2];
+            prevLine = prevPage.lines[prevPage.lines.length - 1];
+          }
+
+          if (curLine.elements.length === 0) {
+            if (element.elementType === ElementType.Note) {
+              const noteElement = element as NoteElement;
+              const previousElement = prevLine
+                ? prevLine.elements[prevLine.elements.length - 1]
+                : null;
+              if (previousElement?.elementType === ElementType.Note) {
+                // If the new line starts with a left measure, apply it to the right
+                // of the previous line
+                const previousNoteElement = previousElement as NoteElement;
+                if (
+                  noteElement.measureBarLeft &&
+                  (noteElement.elementType === ElementType.Martyria ||
+                    !noteElement.measureBarLeft.endsWith('Above'))
+                ) {
+                  previousNoteElement.computedMeasureBarRight =
+                    noteElement.measureBarLeft;
+                }
+              } else if (
+                previousElement?.elementType === ElementType.Martyria
+              ) {
+                // If the previous line ends with a martyria with a barline, apply
+                // it to the left of the new line
+                const previousMartyriaElement =
+                  previousElement as MartyriaElement;
+                const normalizedMeasureBar =
+                  previousMartyriaElement.measureBarLeft?.endsWith('Above')
+                    ? measureBarAboveToLeft.get(
+                        previousMartyriaElement.measureBarLeft,
+                      )
+                    : previousMartyriaElement.measureBarRight;
+                if (normalizedMeasureBar) {
+                  noteElement.computedMeasureBarLeft = normalizedMeasureBar;
+                }
+              }
+            } else if (element.elementType === ElementType.Martyria) {
+              // If the new line starts with a left measure, apply it to the right
+              // of the previous line
+              const martyriaElement = element as MartyriaElement;
+              const previousElement = prevLine
+                ? prevLine.elements[prevLine.elements.length - 1]
+                : null;
+              if (previousElement?.elementType === ElementType.Note) {
+                const previousNoteElement = previousElement as NoteElement;
+                const normalizedMeasureBar =
+                  martyriaElement.measureBarLeft?.endsWith('Above')
+                    ? measureBarAboveToLeft.get(martyriaElement.measureBarLeft)
+                    : martyriaElement.measureBarLeft;
+                if (normalizedMeasureBar) {
+                  previousNoteElement.computedMeasureBarRight =
+                    normalizedMeasureBar;
+                }
+              }
+            }
+          }
+
+          curLine.elements.push(element);
+
+          // Special logic for centered lines
+          if (element.lineBreakType === LineBreakType.Center) {
+            const lineWidth =
+              pageSetup.innerPageWidth - (position.xOffset + position.width);
+            for (const lineElement of curLine.elements) {
+              lineElement.x += lineWidth / 2;
+            }
+          }
+
+          lastElementWasPageBreak = element.pageBreak;
         }
-      } else {
-        // Ensure that there is at least a small width between other elements
-        if (element.x <= currentLyricsEndPx + pageSetup.neumeDefaultSpacing) {
-          const adjustment =
-            currentLyricsEndPx - element.x + pageSetup.neumeDefaultSpacing;
-          element.x += adjustment;
-          currentLyricsEndPx =
-            element.x + element.width + pageSetup.neumeDefaultSpacing;
-          element.width += adjustment;
-          elementWidthPx += adjustment;
-        } else {
-          currentLyricsEndPx =
-            element.x + element.width + pageSetup.neumeDefaultSpacing;
-        }
-      }
-
-      currentLineWidthPx += elementWidthPx;
-
-      // Add extra space between neumes
-      if (
-        [
-          ElementType.Martyria,
-          ElementType.Note,
-          ElementType.Tempo,
-          ElementType.DropCap,
-        ].includes(element.elementType)
-      ) {
-        currentLineWidthPx += pageSetup.neumeDefaultSpacing;
-        element.width += pageSetup.neumeDefaultSpacing;
-        elementWithTrailingSpace = element;
-      } else {
-        elementWithTrailingSpace = null;
-      }
-
-      line.elements.push(element);
-
-      lastElementWasLineBreak = element.lineBreak;
-      lastElementWasPageBreak = element.pageBreak;
-
-      // Handle special case for right-aligned martyria
-      if (
-        element.elementType === ElementType.Martyria &&
-        (element as MartyriaElement).alignRight
-      ) {
-        lastElementWasLineBreak = true;
-
-        // Must not use the element.width because this may include
-        // additional width due to lyrics, neume spacing, etc.
-        element.x =
-          pageSetup.pageWidth -
-          pageSetup.rightMargin -
-          this.getMartyriaWidth(element as MartyriaElement, pageSetup);
       }
     }
-
-    this.justifyLines(pages, pageSetup);
 
     this.addMelismas(pages, pageSetup);
 
@@ -774,6 +1058,194 @@ export class LayoutService {
     });
 
     return pages;
+  }
+
+  private static addBox(
+    width: number,
+    element: ScoreElement,
+    workspace: LayoutWorkspace,
+  ) {
+    const { pendingParagraph } = workspace;
+
+    const box: ElementBox = {
+      type: 'box',
+      width,
+      element,
+    };
+
+    pendingParagraph.push(box);
+
+    workspace.neumesEndPx += width;
+  }
+
+  private static addLyricBox(
+    elementWidthPx: number,
+    workspace: LayoutWorkspace,
+  ) {
+    const { pageSetup } = workspace;
+
+    // Ensure that there is at least a small width between other elements
+    if (
+      workspace.neumesEndPx <=
+      workspace.lyricsEndPx + pageSetup.neumeDefaultSpacing
+    ) {
+      const adjustment =
+        workspace.lyricsEndPx -
+        workspace.neumesEndPx +
+        pageSetup.neumeDefaultSpacing;
+      workspace.pendingParagraph.push({
+        type: 'box',
+        width: adjustment,
+      });
+      workspace.lyricsEndPx =
+        workspace.neumesEndPx + elementWidthPx + pageSetup.neumeDefaultSpacing;
+    } else {
+      workspace.lyricsEndPx =
+        workspace.neumesEndPx + elementWidthPx + pageSetup.neumeDefaultSpacing;
+    }
+  }
+
+  private static forceBreak(workspace: LayoutWorkspace) {
+    const { pendingParagraph } = workspace;
+    pendingParagraph.push(forcedBreak());
+  }
+
+  private static stronglyDiscourageBreak(workspace: LayoutWorkspace) {
+    const { pendingParagraph } = workspace;
+    pendingParagraph.push({
+      type: 'penalty',
+      cost: MAX_COST * 0.5,
+      width: 0,
+      flagged: false,
+    });
+  }
+
+  private static preventBreak(workspace: LayoutWorkspace) {
+    const { pendingParagraph } = workspace;
+    pendingParagraph.push({
+      type: 'penalty',
+      cost: MAX_COST,
+      width: 0,
+      flagged: false,
+    });
+  }
+
+  private static addGlue(glue: Glue, workspace: LayoutWorkspace) {
+    const { pendingParagraph } = workspace;
+
+    if (pendingParagraph.length === 0) {
+      // Do not add glue to the beginning of a paragraph
+      return;
+    }
+
+    pendingParagraph.push(glue);
+
+    workspace.neumesEndPx += glue.width;
+  }
+
+  private static updateGlue(glue: Glue, workspace: LayoutWorkspace) {
+    const { pendingParagraph } = workspace;
+
+    if (pendingParagraph.length === 0) {
+      throw new Error('Cannot update non-existent glue');
+    }
+
+    const lastElement = pendingParagraph[pendingParagraph.length - 1];
+    if (lastElement.type !== 'glue') {
+      throw new Error('Cannot update non-glue: ' + lastElement.type);
+    }
+
+    pendingParagraph.pop();
+    pendingParagraph.push(glue);
+  }
+
+  private static removeGlue(workspace: LayoutWorkspace) {
+    const { pendingParagraph } = workspace;
+
+    if (pendingParagraph.length === 0) {
+      throw new Error('Cannot remove non-existent glue');
+    }
+
+    const lastElement = pendingParagraph[pendingParagraph.length - 1];
+    if (lastElement.type !== 'glue') {
+      throw new Error('Cannot remove non-glue: ' + lastElement.type);
+    }
+
+    pendingParagraph.pop();
+  }
+
+  private static endParagraph(
+    lineBreakType: LineBreakType,
+    workspace: LayoutWorkspace,
+  ) {
+    const { pageSetup, pendingParagraph, completedParagraphs } = workspace;
+
+    if (pendingParagraph.length === 0) {
+      throw new Error('Cannot end an empty paragraph');
+    }
+
+    // Remove the existing glue so that we can apply finishing glue
+    this.removeGlue(workspace);
+
+    // Prevent break before finishing glue
+    this.preventBreak(workspace);
+
+    // Apply finishing glue
+    this.addGlue(
+      {
+        type: 'glue',
+        width: 0,
+        stretch: lineBreakType === LineBreakType.Justify ? 0 : MAX_COST,
+        shrink: 0,
+      },
+      workspace,
+    );
+
+    // Force break and end paragraph
+    this.forceBreak(workspace);
+
+    // Run the total-fit algorithm for line breaking
+    let breakpoints: number[];
+    if (workspace.loggingEnabled) {
+      console.log('Breaking lines', pendingParagraph);
+    }
+    try {
+      breakpoints = breakLines(pendingParagraph, pageSetup.innerPageWidth, {
+        maxAdjustmentRatio: 2,
+        initialMaxAdjustmentRatio: 1,
+        adjacentLooseTightPenalty: MAX_COST * 0.5,
+      });
+    } catch (e) {
+      if (e instanceof MaxAdjustmentExceededError) {
+        console.warn('Maximum adjustment ratio exceeded', e.stack);
+        breakpoints = breakLines(pendingParagraph, pageSetup.innerPageWidth);
+      } else {
+        throw e;
+      }
+    }
+
+    // We have a winner
+    if (workspace.loggingEnabled) {
+      console.log('Breakpoints', breakpoints);
+    }
+    const positions: PositionedItem[] = positionItems(
+      pendingParagraph,
+      pageSetup.innerPageWidth,
+      breakpoints,
+    );
+    if (workspace.loggingEnabled) {
+      console.log('Positions', positions);
+    }
+    completedParagraphs.push({
+      paragraph: pendingParagraph,
+      positions,
+    });
+
+    // Reset state
+    workspace.pendingParagraph = [];
+    workspace.neumesEndPx = 0;
+    workspace.lyricsEndPx = -workspace.pageSetup.lyricsMinimumSpacing;
+    workspace.melismaLyricsEndPx = null;
   }
 
   private static processHeader(
@@ -1256,69 +1728,6 @@ export class LayoutService {
             )
           : 0))
     );
-  }
-
-  public static justifyLines(pages: Page[], pageSetup: PageSetup) {
-    for (const page of pages) {
-      for (const line of page.lines) {
-        if (
-          pages.indexOf(page) === pages.length - 1 &&
-          page.lines.indexOf(line) === page.lines.length - 1
-        ) {
-          continue;
-        }
-
-        if (
-          line.elements.some(
-            (x) =>
-              x.lineBreak == true && x.lineBreakType === LineBreakType.Left,
-          )
-        ) {
-          continue;
-        }
-
-        if (line.elements.some((x) => x.pageBreak == true)) {
-          continue;
-        }
-
-        if (
-          line.elements.some(
-            (x) =>
-              x.elementType === ElementType.Martyria &&
-              (x as MartyriaElement).alignRight == true,
-          )
-        ) {
-          continue;
-        }
-
-        if (line.elements.length < 2) {
-          continue;
-        }
-
-        const alignCenter = line.elements.some(
-          (x) =>
-            x.lineBreak == true && x.lineBreakType === LineBreakType.Center,
-        );
-
-        const currentWidthPx = line.elements
-          .map((x) => x.width)
-          .reduce((sum, x) => sum + x, 0);
-
-        const extraSpace = pageSetup.innerPageWidth - currentWidthPx;
-
-        if (alignCenter) {
-          for (let i = 0; i < line.elements.length; i++) {
-            line.elements[i].x += extraSpace / 2;
-          }
-        } else {
-          const spaceToAdd = extraSpace / (line.elements.length - 1);
-
-          for (let i = 1; i < line.elements.length; i++) {
-            line.elements[i].x += spaceToAdd * i;
-          }
-        }
-      }
-    }
   }
 
   public static addMelismas(pages: Page[], pageSetup: PageSetup) {

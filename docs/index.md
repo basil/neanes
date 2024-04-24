@@ -27,6 +27,8 @@ features:
     details: Point and click to add neumes and see how they will appear on the page.
   - title: Rapid Entry of Neumes and Lyrics
     details: Neumes and lyrics are automatically aligned and martyria are automatically calculated.
+  - title: Advanced Typography
+    details: Paragraph composition results in more even spacing with fewer undesirable breakpoints.
   - title: Print or Export to PDF
     details: Scores can be printed to paper or exported as a PDF, HTML, or image.
 ---
