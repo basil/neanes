@@ -1,8 +1,9 @@
 <template>
   <div
     class="menu-container"
-    @mousedown="openMenu"
-    @mouseleave="selectedOption = null"
+    @mousedown="handleMouseDown"
+    @mouseleave="handleMouseLeave"
+    @mousemove="handleMouseMove"
   >
     <button class="neume-button" :disabled="disabled">
       <img draggable="false" :src="mainIcon" v-if="mainIcon" />
@@ -13,7 +14,8 @@
         v-for="option in options"
         :key="getKey(option)"
         class="menu-item"
-        @mouseenter="selectedOption = option.neume"
+        @click="handleChoiceClick(option.neume)"
+        @mouseenter="handleMouseEnter(option.neume)"
       >
         <img draggable="false" :src="option.icon" v-if="option.icon" />
         <span :style="textStyle" v-if="option.text">{{ option.text }}</span>
@@ -58,12 +60,19 @@ export default defineComponent({
   data() {
     return {
       showMenu: false,
+      holding: false,
+      mouseMoved: false,
       selectedOption: null as Neume | Neume[] | null,
     };
   },
 
+  mounted() {
+    window.addEventListener('pointerdown', this.handleGlobalPointerDown);
+  },
+
   beforeUnmount() {
     window.removeEventListener('mouseup', this.onMouseUp);
+    window.removeEventListener('pointerdown', this.handleGlobalPointerDown);
   },
 
   computed: {
@@ -91,23 +100,58 @@ export default defineComponent({
       return Array.isArray(option.neume) ? option.neume[0] : option.neume;
     },
 
-    openMenu() {
+    handleMouseDown() {
       if (this.disabled) {
         return;
       }
 
       this.showMenu = true;
+      this.holding = true;
+      this.mouseMoved = false;
       window.addEventListener('mouseup', this.onMouseUp);
     },
 
+    handleMouseMove() {
+      if (this.holding && !this.mouseMoved) {
+        this.mouseMoved = true;
+      }
+    },
+
+    handleMouseEnter(selectedOption: Neume | Neume[]) {
+      if (this.holding && this.mouseMoved) {
+        this.selectedOption = selectedOption;
+      }
+    },
+
+    handleMouseLeave() {
+      if (this.holding) {
+        this.selectedOption = null;
+      }
+    },
+
+    handleGlobalPointerDown(e: MouseEvent) {
+      if (!this.holding && !this.$el.contains(e.target)) {
+        this.showMenu = false;
+      }
+    },
+
+    handleChoiceClick(selectedOption: Neume | Neume[]) {
+      if (!this.holding) {
+        this.$emit('select', selectedOption);
+        this.showMenu = false;
+      }
+    },
+
     onMouseUp() {
+      window.removeEventListener('mouseup', this.onMouseUp);
+
       if (this.selectedOption) {
         this.$emit('select', this.selectedOption);
+        this.showMenu = false;
+        this.selectedOption = null;
       }
 
-      this.showMenu = false;
-
-      window.removeEventListener('mouseup', this.onMouseUp);
+      this.holding = false;
     },
   },
 });
