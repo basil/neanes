@@ -384,7 +384,7 @@
       ],
       "isonIndicator": [
         0.71,
-        1.098
+        0.913
       ],
       "heteronConnecting": [
         1.61,
@@ -473,8 +473,8 @@
         0.827
       ],
       "isonIndicator": [
-        1.04,
-        1.098
+        0.71,
+        0.913
       ],
       "heteronConnecting": [
         1.61,
@@ -564,7 +564,7 @@
       ],
       "isonIndicator": [
         0.71,
-        1.181
+        0.913
       ],
       "heteronConnecting": [
         1.61,
@@ -654,7 +654,7 @@
       ],
       "isonIndicator": [
         0.71,
-        1.39
+        0.913
       ],
       "heteronConnecting": [
         1.61,
@@ -740,7 +740,7 @@
       ],
       "isonIndicator": [
         0.71,
-        1.283
+        0.913
       ],
       "heteronConnecting": [
         1.61,
@@ -826,7 +826,7 @@
       ],
       "isonIndicator": [
         0.71,
-        1.392
+        0.913
       ],
       "heteronConnecting": [
         1.61,
@@ -1094,7 +1094,7 @@
       ],
       "isonIndicator": [
         0.971,
-        0.939
+        0.913
       ],
       "heteronConnecting": [
         1.882,
@@ -1164,7 +1164,7 @@
       ],
       "isonIndicator": [
         0.449,
-        0.939
+        0.913
       ],
       "gorgonBottom": [
         0.408,
@@ -1242,7 +1242,7 @@
       ],
       "isonIndicator": [
         0.449,
-        0.939
+        0.913
       ],
       "heteronConnecting": [
         1.341,
@@ -1312,7 +1312,7 @@
       ],
       "isonIndicator": [
         0.456,
-        1.039
+        0.913
       ],
       "heteronConnecting": [
         1.212,
@@ -1382,7 +1382,7 @@
       ],
       "isonIndicator": [
         0.456,
-        1.039
+        0.913
       ],
       "gorgonBottom": [
         0.321,
@@ -1456,7 +1456,7 @@
       ],
       "isonIndicator": [
         0.449,
-        1.369
+        0.913
       ],
       "heteronConnecting": [
         1.341,
@@ -1526,7 +1526,7 @@
       ],
       "isonIndicator": [
         0.449,
-        1.369
+        0.913
       ],
       "heteronConnecting": [
         1.341,
@@ -1596,7 +1596,7 @@
       ],
       "isonIndicator": [
         0.46,
-        1.386
+        0.913
       ],
       "heteronConnecting": [
         1.216,
@@ -1678,7 +1678,7 @@
       ],
       "isonIndicator": [
         0.637,
-        1.096
+        0.913
       ],
       "apli": [
         0.688,
@@ -1876,7 +1876,7 @@
       ],
       "isonIndicator": [
         0.585,
-        0.949
+        0.913
       ],
       "apli": [
         0.686,
@@ -1941,8 +1941,8 @@
         0.853
       ],
       "isonIndicator": [
-        0.56,
-        1.129
+        0.59,
+        0.913
       ],
       "apli": [
         0.691,
@@ -2008,7 +2008,7 @@
       ],
       "isonIndicator": [
         0.59,
-        1.342
+        0.913
       ],
       "apli": [
         0.691,
@@ -2073,8 +2073,8 @@
         0.853
       ],
       "isonIndicator": [
-        0.56,
-        1.129
+        0.59,
+        0.913
       ],
       "apli": [
         0.691,
@@ -2140,7 +2140,7 @@
       ],
       "isonIndicator": [
         0.59,
-        1.39
+        0.913
       ],
       "apli": [
         0.691,
@@ -2202,7 +2202,7 @@
       ],
       "isonIndicator": [
         0.59,
-        0.931
+        0.913
       ],
       "apli": [
         0.691,
@@ -2268,7 +2268,7 @@
       ],
       "isonIndicator": [
         0.581,
-        1.08
+        0.913
       ],
       "apli": [
         0.686,
@@ -2334,7 +2334,7 @@
       ],
       "isonIndicator": [
         0.565,
-        1.075
+        0.913
       ],
       "apli": [
         0.686,
@@ -2400,7 +2400,7 @@
       ],
       "isonIndicator": [
         0.582,
-        1.221
+        0.913
       ],
       "apli": [
         0.697,
@@ -2520,7 +2520,7 @@
       ],
       "isonIndicator": [
         0.628,
-        1.126
+        0.913
       ],
       "antikenoma": [
         0.738,
@@ -2594,7 +2594,7 @@
       ],
       "isonIndicator": [
         0.627,
-        1.119
+        0.913
       ],
       "antikenoma": [
         0.97,
@@ -2651,8 +2651,8 @@
         0.983
       ],
       "isonIndicator": [
-        1.048,
-        1.155
+        0.628,
+        0.913
       ],
       "antikenoma": [
         0.738,
@@ -2726,7 +2726,7 @@
       ],
       "isonIndicator": [
         0.63,
-        1.099
+        0.913
       ],
       "antikenoma": [
         0.743,
@@ -2804,7 +2804,7 @@
       ],
       "isonIndicator": [
         0.63,
-        1.092
+        0.913
       ],
       "antikenoma": [
         1.013,
@@ -2874,7 +2874,7 @@
       ],
       "isonIndicator": [
         0.636,
-        1.092
+        0.913
       ],
       "antikenoma": [
         0.743,
@@ -3034,7 +3034,7 @@
       ],
       "isonIndicator": [
         0.733,
-        1.458
+        0.913
       ],
       "heteronConnecting": [
         1.633,
@@ -3116,7 +3116,7 @@
       ],
       "isonIndicator": [
         0.71,
-        0.96
+        0.913
       ],
       "heteronConnecting": [
         1.61,
@@ -3198,7 +3198,7 @@
       ],
       "isonIndicator": [
         0.71,
-        0.987
+        0.913
       ],
       "heteronConnecting": [
         1.61,
@@ -3296,7 +3296,7 @@
       ],
       "isonIndicator": [
         0.909,
-        0.976
+        0.913
       ],
       "apli": [
         1.172,
@@ -3362,7 +3362,7 @@
       ],
       "isonIndicator": [
         0.71,
-        0.944
+        0.913
       ],
       "heteronConnecting": [
         1.61,
@@ -3542,7 +3542,7 @@
       ],
       "isonIndicator": [
         0.587,
-        1.117
+        0.913
       ],
       "apli": [
         0.688,
@@ -3632,7 +3632,7 @@
       ],
       "isonIndicator": [
         0.719,
-        1.099
+        0.913
       ],
       "antikenoma": [
         1.262,
@@ -3706,7 +3706,7 @@
       ],
       "isonIndicator": [
         0.631,
-        1.092
+        0.913
       ],
       "antikenoma": [
         0.741,
@@ -3764,7 +3764,7 @@
       ],
       "isonIndicator": [
         0.628,
-        1.126
+        0.913
       ],
       "antikenoma": [
         0.738,
@@ -3822,7 +3822,7 @@
       ],
       "isonIndicator": [
         0.628,
-        1.138
+        0.913
       ],
       "antikenoma": [
         0.738,
@@ -3888,7 +3888,7 @@
       ],
       "isonIndicator": [
         0.582,
-        1.221
+        0.913
       ],
       "apli": [
         0.697,
@@ -3954,7 +3954,7 @@
       ],
       "isonIndicator": [
         0.281,
-        0.939
+        0.913
       ],
       "gorgonBottom": [
         0.263,
@@ -4024,7 +4024,7 @@
       ],
       "isonIndicator": [
         0.733,
-        1.458
+        0.913
       ],
       "heteronConnecting": [
         1.633,
@@ -4102,7 +4102,7 @@
       ],
       "isonIndicator": [
         0.46,
-        1.406
+        0.913
       ],
       "heteronConnecting": [
         1.216,
@@ -4172,7 +4172,7 @@
       ],
       "isonIndicator": [
         0.46,
-        1.406
+        0.913
       ],
       "heteronConnecting": [
         1.216,
@@ -4242,7 +4242,7 @@
       ],
       "isonIndicator": [
         0.46,
-        1.406
+        0.913
       ],
       "heteronConnecting": [
         1.216,
@@ -4324,7 +4324,7 @@
       ],
       "isonIndicator": [
         0.59,
-        1.468
+        0.913
       ],
       "apli": [
         0.691,
@@ -4390,7 +4390,7 @@
       ],
       "isonIndicator": [
         0.59,
-        1.463
+        0.913
       ],
       "apli": [
         0.691,
@@ -4456,7 +4456,7 @@
       ],
       "isonIndicator": [
         0.62,
-        1.463
+        0.913
       ],
       "apli": [
         0.721,
@@ -4522,7 +4522,7 @@
       ],
       "isonIndicator": [
         0.693,
-        1.468
+        0.913
       ],
       "apli": [
         0.794,
@@ -4588,7 +4588,7 @@
       ],
       "isonIndicator": [
         0.62,
-        1.342
+        0.913
       ],
       "apli": [
         0.721,
@@ -4646,7 +4646,7 @@
       ],
       "isonIndicator": [
         0.71,
-        1.458
+        0.913
       ],
       "heteronConnecting": [
         1.61,
@@ -4728,7 +4728,7 @@
       ],
       "isonIndicator": [
         0.733,
-        1.458
+        0.913
       ],
       "heteronConnecting": [
         1.633,
@@ -4810,7 +4810,7 @@
       ],
       "isonIndicator": [
         0.733,
-        1.283
+        0.913
       ],
       "heteronConnecting": [
         1.633,
@@ -4892,7 +4892,7 @@
       ],
       "isonIndicator": [
         0.71,
-        0.987
+        0.913
       ],
       "heteronConnecting": [
         1.61,
@@ -4982,7 +4982,7 @@
       ],
       "isonIndicator": [
         0.59,
-        1.345
+        0.913
       ],
       "apli": [
         0.691,
@@ -5040,7 +5040,7 @@
       ],
       "isonIndicator": [
         0.71,
-        1.056
+        0.913
       ],
       "heteronConnecting": [
         1.61,
@@ -5126,7 +5126,7 @@
       ],
       "isonIndicator": [
         0.6,
-        1.492
+        0.913
       ],
       "apli": [
         0.715,
@@ -5192,7 +5192,7 @@
       ],
       "isonIndicator": [
         0.6,
-        1.492
+        0.913
       ],
       "apli": [
         0.715,
@@ -5258,7 +5258,7 @@
       ],
       "isonIndicator": [
         0.592,
-        1.35
+        0.913
       ],
       "apli": [
         0.707,
@@ -5324,7 +5324,7 @@
       ],
       "isonIndicator": [
         0.592,
-        1.35
+        0.913
       ],
       "apli": [
         0.707,
@@ -5504,7 +5504,7 @@
       ],
       "isonIndicator": [
         0.47,
-        1.556
+        0.913
       ],
       "heteronConnecting": [
         1.226,
@@ -6032,7 +6032,7 @@
       ],
       "isonIndicator": [
         0.693,
-        1.468
+        0.913
       ],
       "fthoraTop": [
         1.253,
@@ -7106,7 +7106,7 @@
       ],
       "isonIndicator": [
         0.641,
-        1.099
+        0.913
       ],
       "antikenoma": [
         1.031,

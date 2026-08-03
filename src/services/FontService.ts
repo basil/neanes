@@ -31,6 +31,11 @@ interface GlyphBBox {
   bBoxSW: [number, number];
 }
 
+interface MarkAnchorPair {
+  baseAnchor: [number, number];
+  markAnchor: [number, number];
+}
+
 interface CollisionRegion extends GlyphBBox {
   name: string;
 }
@@ -167,31 +172,36 @@ class FontService {
     base: SbmuflGlyphName,
     mark: SbmuflGlyphName,
   ) {
-    const metadata = this.getMetadata(fontFamily);
-    const baseAnchors = metadata.glyphsWithAnchors[base];
-    const markAnchors = metadata.glyphsWithAnchors[mark];
+    const offset = this.tryGetMarkOffset(fontFamily, base, mark);
 
-    if (baseAnchors == null || markAnchors == null) {
+    if (offset == null) {
       console.warn(`Missing anchor for base: ${base} mark: ${mark}`);
       return { x: 0, y: 0 };
     }
 
-    const markAnchorName = Object.keys(markAnchors).find(
-      (x) => baseAnchors[x] != null,
+    return offset;
+  }
+
+  tryGetMarkOffset(
+    fontFamily: string,
+    base: SbmuflGlyphName,
+    mark: SbmuflGlyphName,
+    anchorName?: string,
+  ) {
+    const anchorPair = this.tryGetMarkAnchorPair(
+      fontFamily,
+      base,
+      mark,
+      anchorName,
     );
 
-    if (markAnchorName == null) {
-      console.warn(`Missing anchor for base: ${base} mark: ${mark}`);
-      return { x: 0, y: 0 };
+    if (anchorPair == null) {
+      return null;
     }
 
-    const markAnchor = markAnchors[markAnchorName] as number[];
-
-    const baseAnchor = baseAnchors[markAnchorName] as number[];
-
     return {
-      x: baseAnchor[0] - markAnchor[0],
-      y: -(baseAnchor[1] - markAnchor[1]),
+      x: anchorPair.baseAnchor[0] - anchorPair.markAnchor[0],
+      y: -(anchorPair.baseAnchor[1] - anchorPair.markAnchor[1]),
     };
   }
 
@@ -199,24 +209,58 @@ class FontService {
     fontFamily: string,
     base: SbmuflGlyphName,
     mark: SbmuflGlyphName,
+    anchorName?: string,
   ) {
-    const metadata = this.getMetadata(fontFamily);
-    const markAnchorName = Object.keys(metadata.glyphsWithAnchors[mark]).find(
-      (x) => metadata.glyphsWithAnchors[base][x] != null,
+    const anchorPair = this.tryGetMarkAnchorPair(
+      fontFamily,
+      base,
+      mark,
+      anchorName,
     );
 
-    if (markAnchorName == null) {
+    if (anchorPair == null) {
       console.warn(`Missing anchor for base: ${base} mark: ${mark}`);
       return { x: 0, y: 0 };
     }
 
-    const baseAnchor = metadata.glyphsWithAnchors[base][
-      markAnchorName
-    ] as number[];
+    return {
+      x: anchorPair.baseAnchor[0],
+      y: this.getMetrics(fontFamily).winAscent - anchorPair.baseAnchor[1],
+    };
+  }
+
+  private tryGetMarkAnchorPair(
+    fontFamily: string,
+    base: SbmuflGlyphName,
+    mark: SbmuflGlyphName,
+    anchorName?: string,
+  ): MarkAnchorPair | null {
+    const metadata = this.getMetadata(fontFamily);
+    const baseAnchors = metadata.glyphsWithAnchors[base];
+    const markAnchors = metadata.glyphsWithAnchors[mark];
+
+    if (baseAnchors == null || markAnchors == null) {
+      return null;
+    }
+
+    const candidateAnchorNames =
+      anchorName != null
+        ? [anchorName, ...Object.keys(markAnchors)]
+        : Object.keys(markAnchors);
+    const sharedAnchorName = candidateAnchorNames.find(
+      (name) => baseAnchors[name] != null && markAnchors[name] != null,
+    );
+
+    if (sharedAnchorName == null) {
+      return null;
+    }
+
+    const baseAnchor = baseAnchors[sharedAnchorName] as [number, number];
+    const markAnchor = markAnchors[sharedAnchorName] as [number, number];
 
     return {
-      x: baseAnchor[0],
-      y: metadata.metrics.winAscent - baseAnchor[1],
+      baseAnchor,
+      markAnchor,
     };
   }
 }

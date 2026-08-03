@@ -35,6 +35,7 @@ import {
   fontVariantCssDeclarations,
 } from '@/utils/fontVariants';
 import { getFontFamilyWithFallback } from '@/utils/getFontFamilyWithFallback';
+import { getEffectiveNoteMarkOffset } from '@/utils/noteMarkOffsets';
 import { resolvePageMargins } from '@/utils/PageMargins';
 import { isRightHandPage } from '@/utils/PageNumbering';
 import {
@@ -836,21 +837,21 @@ export class ByzHtmlExporter {
     inner += this.exportNeume(
       element.fthora,
       indentation + 2,
-      { x: element.fthoraOffsetX, y: element.fthoraOffsetY },
+      getEffectiveNoteMarkOffset(element, 'fthora'),
       this.config.classFthora,
     );
 
     inner += this.exportNeume(
       element.secondaryFthora,
       indentation + 2,
-      { x: element.secondaryFthoraOffsetX, y: element.secondaryFthoraOffsetY },
+      getEffectiveNoteMarkOffset(element, 'secondaryFthora'),
       this.config.classFthora,
     );
 
     inner += this.exportNeume(
       element.tertiaryFthora,
       indentation + 2,
-      { x: element.tertiaryFthoraOffsetX, y: element.tertiaryFthoraOffsetY },
+      getEffectiveNoteMarkOffset(element, 'tertiaryFthora'),
       this.config.classFthora,
     );
 
@@ -886,7 +887,7 @@ export class ByzHtmlExporter {
     inner += this.exportNeume(
       element.ison,
       indentation + 2,
-      { x: element.isonOffsetX, y: element.computedIsonOffsetY },
+      getEffectiveNoteMarkOffset(element, 'ison'),
       this.config.classIson,
     );
 
@@ -896,10 +897,11 @@ export class ByzHtmlExporter {
     });
 
     if (element.koronis) {
-      inner += this.exportNeume(TimeNeume.Koronis, indentation + 2, {
-        x: element.koronisOffsetX,
-        y: element.koronisOffsetY,
-      });
+      inner += this.exportNeume(
+        TimeNeume.Koronis,
+        indentation + 2,
+        getEffectiveNoteMarkOffset(element, 'koronis'),
+      );
     }
 
     if (element.measureBarRight) {

@@ -25,6 +25,8 @@ import {
   type OpenTypeFeatures,
   resolveOpenTypeFeatures,
 } from '@/utils/fontVariants';
+import type { MovableMarkKey } from '@/utils/noteMarkOffsets';
+import { getEffectiveNoteMarkOffset } from '@/utils/noteMarkOffsets';
 import { resolvePageMargins } from '@/utils/PageMargins';
 import { resolveRunningMarkerText } from '@/utils/runningMarkers';
 import { Unit } from '@/utils/Unit';
@@ -84,6 +86,15 @@ function getOffset(
   return { x, y };
 }
 
+function getNoteMarkOffset(
+  markNeume: Neume | null,
+  note: NoteElement,
+  markKey: MovableMarkKey,
+) {
+  const offset = getEffectiveNoteMarkOffset(note, markKey);
+
+  return getOffset(markNeume, offset.x, offset.y);
+}
 function convertFontName(fontFamily: string) {
   return fontFamily === 'Source Serif' ? 'Source Serif 4' : fontFamily;
 }
@@ -425,11 +436,7 @@ Distance Between Baselines = Lyrics Vertical Offset + Neume Descent + Lyrics Asc
               ),
               koronis: note.koronis || undefined,
               koronisOffset: note.koronis
-                ? getOffset(
-                    TimeNeume.Koronis,
-                    note.koronisOffsetX,
-                    note.koronisOffsetY,
-                  )
+                ? getNoteMarkOffset(TimeNeume.Koronis, note, 'koronis')
                 : undefined,
               tie: glyphName(note.tie),
               tieOffset: getOffset(note.tie, note.tieOffsetX, note.tieOffsetY),
@@ -446,22 +453,18 @@ Distance Between Baselines = Lyrics Vertical Offset + Neume Descent + Lyrics Asc
                 note.secondaryGorgonNeumeOffsetY,
               ),
               fthora: glyphName(note.fthora),
-              fthoraOffset: getOffset(
-                note.fthora,
-                note.fthoraOffsetX,
-                note.fthoraOffsetY,
-              ),
+              fthoraOffset: getNoteMarkOffset(note.fthora, note, 'fthora'),
               fthoraSecondary: glyphName(note.secondaryFthora),
-              fthoraSecondaryOffset: getOffset(
+              fthoraSecondaryOffset: getNoteMarkOffset(
                 note.secondaryFthora,
-                note.secondaryFthoraOffsetX,
-                note.secondaryFthoraOffsetY,
+                note,
+                'secondaryFthora',
               ),
               fthoraTertiary: glyphName(note.tertiaryFthora),
-              fthoraTertiaryOffset: getOffset(
+              fthoraTertiaryOffset: getNoteMarkOffset(
                 note.tertiaryFthora,
-                note.tertiaryFthoraOffsetX,
-                note.tertiaryFthoraOffsetY,
+                note,
+                'tertiaryFthora',
               ),
               vocalExpression: glyphName(note.vocalExpressionNeume),
               vocalExpressionOffset: getOffset(
@@ -488,11 +491,7 @@ Distance Between Baselines = Lyrics Vertical Offset + Neume Descent + Lyrics Asc
                 note.tertiaryAccidentalOffsetY,
               ),
               ison: glyphName(note.ison),
-              isonOffset: getOffset(
-                note.ison,
-                note.isonOffsetX,
-                note.computedIsonOffsetY,
-              ),
+              isonOffset: getNoteMarkOffset(note.ison, note, 'ison'),
               noteIndicator: glyphName(
                 note.noteIndicator ? note.noteIndicatorNeume : null,
               ),

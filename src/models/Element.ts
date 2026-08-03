@@ -195,12 +195,23 @@ export class NoteElement extends ScoreElement {
   public fthoraPrevious: Fthora | null = null;
   public secondaryFthoraPrevious: Fthora | null = null;
   public tertiaryFthoraPrevious: Fthora | null = null;
+  public koronisPrevious: boolean = false;
+  public isonPrevious: Ison | null = null;
   public computedMeasureBarLeftPrevious: MeasureBar | null = null;
   public computedMeasureBarRightPrevious: MeasureBar | null = null;
   public computedMeasureBarLeftOffsetXPrevious: number = 0;
   public computedMeasureBarRightOffsetXPrevious: number = 0;
   public computedMeasureBarLeftLeadingSpacingPrevious: number = 0;
   public computedMeasureBarRightTrailingSpacingPrevious: number = 0;
+  public computedFthoraOffsetXPrevious: number | null = null;
+  public computedFthoraOffsetYPrevious: number | null = null;
+  public computedSecondaryFthoraOffsetXPrevious: number | null = null;
+  public computedSecondaryFthoraOffsetYPrevious: number | null = null;
+  public computedTertiaryFthoraOffsetXPrevious: number | null = null;
+  public computedTertiaryFthoraOffsetYPrevious: number | null = null;
+  public computedKoronisOffsetXPrevious: number | null = null;
+  public computedKoronisOffsetYPrevious: number | null = null;
+  public computedIsonOffsetXPrevious: number | null = null;
   public computedIsonOffsetYPrevious: number | null = null;
   public vareiaInternalSpacingPrevious: number = 0;
 
@@ -519,8 +530,16 @@ export class NoteElement extends ScoreElement {
   public computedMeasureBarRightOffsetX: number = 0;
   public computedMeasureBarLeftLeadingSpacing: number = 0;
   public computedMeasureBarRightTrailingSpacing: number = 0;
+  public computedFthoraOffsetX: number | null = null;
+  public computedFthoraOffsetY: number | null = null;
+  public computedSecondaryFthoraOffsetX: number | null = null;
+  public computedSecondaryFthoraOffsetY: number | null = null;
+  public computedTertiaryFthoraOffsetX: number | null = null;
+  public computedTertiaryFthoraOffsetY: number | null = null;
+  public computedKoronisOffsetX: number | null = null;
+  public computedKoronisOffsetY: number | null = null;
+  public computedIsonOffsetX: number | null = null;
   public computedIsonOffsetY: number | null = null;
-  public isonOffsetYBeforeAdjustment: number = 0;
 
   private _quantitativeNeume: QuantitativeNeume = QuantitativeNeume.Ison;
   private _timeNeume: TimeNeume | null = null;
