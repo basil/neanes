@@ -26,6 +26,7 @@ import { debounce, throttle } from 'throttle-debounce';
 import {
   computed,
   type CSSProperties,
+  defineAsyncComponent,
   nextTick,
   onBeforeUnmount,
   onMounted,
@@ -69,6 +70,7 @@ import NeumeSelector from '@/components/NeumeSelector.vue';
 import PageSetupDialog from '@/components/PageSetupDialog.vue';
 import ParagraphStylesDialog from '@/components/ParagraphStylesDialog.vue';
 import PlaybackSettingsDialog from '@/components/PlaybackSettingsDialog.vue';
+import type { PrintPreviewSettings } from '@/components/PrintPreviewDialog.types';
 import type { InspectorContext } from '@/components/properties/InspectorContext';
 import PropertiesPane from '@/components/properties/PropertiesPane.vue';
 import RecoveryDialog from '@/components/RecoveryDialog.vue';
@@ -105,6 +107,7 @@ import {
   focusLastActiveEditorForOwner,
   isActiveEditorForOwner,
 } from '@/composables/useRichTextEditorRegistry';
+import { useZoomWheelStepper } from '@/composables/useZoomWheelStepper';
 import { EventBus } from '@/eventBus';
 import { resolveLanguagePreference } from '@/i18n';
 import { editorPreferencesKey } from '@/injectionKeys';
@@ -121,6 +124,7 @@ import type {
   FileMenuViewZoomArgs,
   RecoveryCandidateArgs,
   RecoverySnapshotArgs,
+  RenderWorkspaceAsPdfReplyArgs,
   ShowMessageBoxReplyArgs,
   WorkspaceZoomState,
 } from '@/ipc/ipcChannels';
@@ -203,6 +207,7 @@ import { Score } from '@/models/Score';
 import type { ScoreElementSelectionRange } from '@/models/ScoreElementSelectionRange';
 import type { WorkspaceLocalStorage, ZoomFitMode } from '@/models/Workspace';
 import {
+  findZoomStep,
   formatZoomPercent,
   MAX_ZOOM,
   MIN_ZOOM,
@@ -282,6 +287,10 @@ import { shallowEquals } from '@/utils/shallowEquals';
 import { TestFileGenerator } from '@/utils/TestFileGenerator';
 import { TestFileType } from '@/utils/TestFileType';
 import { withZoom } from '@/utils/withZoom';
+
+const PrintPreviewDialog = defineAsyncComponent(
+  () => import('@/components/PrintPreviewDialog.vue'),
+);
 
 interface Vue3TabsChromeComponent {
   addTab: (...newTabs: Array<Tab>) => void;
@@ -511,6 +520,7 @@ const modeKeyDialogIsOpen = ref(false);
 const syllablePositioningDialogIsOpen = ref(false);
 const playbackSettingsDialogIsOpen = ref(false);
 const pageSetupDialogIsOpen = ref(false);
+const printPreviewDialogIsOpen = ref(false);
 const paragraphStylesDialogIsOpen = ref(false);
 const paragraphStylesDialogSelectedStyleId = ref<string>(
   BUILT_IN_PARAGRAPH_STYLE_IDS.DefaultText,
@@ -1469,6 +1479,7 @@ const dialogOpen = computed(() => {
   return (
     modeKeyDialogIsOpen.value ||
     pageSetupDialogIsOpen.value ||
+    printPreviewDialogIsOpen.value ||
     paragraphStylesDialogIsOpen.value ||
     documentPropertiesDialogIsOpen.value ||
     playbackSettingsDialogIsOpen.value ||
@@ -1478,6 +1489,13 @@ const dialogOpen = computed(() => {
     aboutDialogIsOpen.value
   );
 });
+
+const printPreviewSettings = computed<PrintPreviewSettings>(() => ({
+  viewMode: editorEnvironment.value.printPreviewViewMode,
+  rulerIsVisible: editorEnvironment.value.printPreviewRulerIsVisible,
+  zoom: editorEnvironment.value.printPreviewZoom,
+  zoomFitMode: editorEnvironment.value.printPreviewZoomFitMode,
+}));
 
 const filteredPages = computed(() => {
   return printMode.value ? pages.value.filter((x) => !x.isEmpty) : pages.value;
@@ -1555,10 +1573,7 @@ const throttled = {
   onScroll: throttle(250, onScroll),
 };
 const saveDebounced = debounce(250, save);
-const ZOOM_WHEEL_DELTA_THRESHOLD = 80;
-const ZOOM_WHEEL_DELTA_RESET_DELAY_MS = 200;
-let zoomWheelDelta = 0;
-let zoomWheelResetTimeout: number | null = null;
+const zoomWheelStepper = useZoomWheelStepper();
 
 if (isDevelopment.value) {
   for (const [key, val] of Object.entries(throttled)) {
@@ -1764,6 +1779,7 @@ onMounted(() => {
   EventBus.$on(IpcMainChannels.FileMenuNewScore, onFileMenuNewScore);
   EventBus.$on(IpcMainChannels.FileMenuOpenScore, onFileMenuOpenScore);
   EventBus.$on(IpcMainChannels.FileMenuPrint, onFileMenuPrint);
+  EventBus.$on(IpcMainChannels.FileMenuPrintPreview, onFileMenuPrintPreview);
   EventBus.$on(IpcMainChannels.FileMenuSave, onFileMenuSave);
   EventBus.$on(IpcMainChannels.FileMenuSaveAs, onFileMenuSaveAs);
   EventBus.$on(IpcMainChannels.FileMenuPageSetup, onFileMenuPageSetup);
@@ -1873,7 +1889,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown);
   window.removeEventListener('keyup', onKeyup);
   window.removeEventListener('resize', throttled.onEditorViewportResize);
-  clearZoomWheelDeltaReset();
   saveEditorEnvironment();
 
   EventBus.$off(IpcMainChannels.CloseWorkspaces, onCloseWorkspaces);
@@ -1884,6 +1899,7 @@ onBeforeUnmount(() => {
   EventBus.$off(IpcMainChannels.FileMenuNewScore, onFileMenuNewScore);
   EventBus.$off(IpcMainChannels.FileMenuOpenScore, onFileMenuOpenScore);
   EventBus.$off(IpcMainChannels.FileMenuPrint, onFileMenuPrint);
+  EventBus.$off(IpcMainChannels.FileMenuPrintPreview, onFileMenuPrintPreview);
   EventBus.$off(IpcMainChannels.FileMenuSave, onFileMenuSave);
   EventBus.$off(IpcMainChannels.FileMenuSaveAs, onFileMenuSaveAs);
   EventBus.$off(IpcMainChannels.FileMenuPageSetup, onFileMenuPageSetup);
@@ -3915,29 +3931,6 @@ type ZoomWheelAnchor =
       viewportOffsetY: number;
     };
 
-function resetZoomWheelDelta() {
-  zoomWheelDelta = 0;
-  clearZoomWheelDeltaReset();
-}
-
-function clearZoomWheelDeltaReset() {
-  if (zoomWheelResetTimeout == null) {
-    return;
-  }
-
-  window.clearTimeout(zoomWheelResetTimeout);
-  zoomWheelResetTimeout = null;
-}
-
-function scheduleZoomWheelDeltaReset() {
-  clearZoomWheelDeltaReset();
-
-  zoomWheelResetTimeout = window.setTimeout(() => {
-    zoomWheelDelta = 0;
-    zoomWheelResetTimeout = null;
-  }, ZOOM_WHEEL_DELTA_RESET_DELAY_MS);
-}
-
 function createZoomWheelAnchor(
   event: WheelEvent,
   pageBackgroundElement: HTMLElement,
@@ -4066,32 +4059,11 @@ function onPageBackgroundWheel(event: WheelEvent) {
     return;
   }
 
-  // Discrete wheels (e.g. Firefox in line/page mode) deliver one notch per
-  // event, so zoom a single step immediately. The accumulator below is tuned
-  // for high-resolution pixel deltas (mice and trackpad pinch in Chromium);
-  // accumulating discrete notches would require several to cross the
-  // threshold, making one deliberate notch feel unresponsive.
-  if (event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL) {
-    resetZoomWheelDelta();
-    applyZoomWheelStep(event, pageBackgroundElement, deltaY < 0 ? 1 : -1);
-    return;
+  const direction = zoomWheelStepper.step(event);
+
+  if (direction != null) {
+    applyZoomWheelStep(event, pageBackgroundElement, direction);
   }
-
-  if (zoomWheelDelta !== 0 && Math.sign(zoomWheelDelta) !== Math.sign(deltaY)) {
-    zoomWheelDelta = 0;
-  }
-
-  zoomWheelDelta += deltaY;
-
-  if (Math.abs(zoomWheelDelta) < ZOOM_WHEEL_DELTA_THRESHOLD) {
-    scheduleZoomWheelDeltaReset();
-    return;
-  }
-
-  const direction = zoomWheelDelta < 0 ? 1 : -1;
-
-  resetZoomWheelDelta();
-  applyZoomWheelStep(event, pageBackgroundElement, direction);
 }
 
 function onKeydown(event: KeyboardEvent) {
@@ -7892,13 +7864,7 @@ function updateZoom(newZoom: number) {
 }
 
 function zoomToNearestStep(direction: 1 | -1) {
-  const zoomStepEpsilon = 0.000001;
-  const zoomStep =
-    direction > 0
-      ? ZOOM_LEVELS.find((option) => option > zoom.value + zoomStepEpsilon)
-      : [...ZOOM_LEVELS]
-          .reverse()
-          .find((option) => option < zoom.value - zoomStepEpsilon);
+  const zoomStep = findZoomStep(ZOOM_LEVELS, zoom.value, direction);
 
   if (zoomStep != null) {
     updateZoom(zoomStep);
@@ -8305,44 +8271,51 @@ function onFileMenuDocumentProperties() {
   documentPropertiesDialogIsOpen.value = true;
 }
 
-async function onFileMenuPrint() {
+async function withPrintMode<T>(
+  fn: () => Promise<T>,
+  options: { restoreFocus?: boolean } = {},
+): Promise<T> {
   prepareWorkspaceForSerialization(selectedWorkspace.value);
-
   printMode.value = true;
 
   // Blur the active element so that focus outlines and
   // blinking cursors don't show up in the printed page
   const activeElement = blurActiveElement();
-
-  const previousTitle = window.document.title;
-  window.document.title = getFileName(selectedWorkspace.value, false);
-
-  nextTick(async () => {
-    await ipcService.printWorkspace(selectedWorkspace.value);
-    printMode.value = false;
-    window.document.title = previousTitle;
-
-    // Re-focus the active element
-    focusElement(activeElement);
-  });
-}
-
-async function onFileMenuExportAsPdf() {
-  prepareWorkspaceForSerialization(selectedWorkspace.value);
-
-  printMode.value = true;
-
-  // Blur the active element so that focus outlines and
-  // blinking cursors don't show up in the printed page
-  const activeElement = blurActiveElement();
-
   const previousTitle = window.document.title;
   window.document.title = getFileName(selectedWorkspace.value, false);
 
   try {
     await nextTick();
-    const reply = await ipcService.exportWorkspaceAsPdf(
-      selectedWorkspace.value,
+    return await fn();
+  } finally {
+    printMode.value = false;
+    window.document.title = previousTitle;
+
+    if (options.restoreFocus !== false) {
+      focusElement(activeElement);
+    }
+  }
+}
+
+async function printScore(options: { restoreFocus?: boolean } = {}) {
+  await withPrintMode(
+    async () => await ipcService.printWorkspace(selectedWorkspace.value),
+    options,
+  );
+}
+
+// EventBus handlers must stay zero-arg: ipcListeners forwards menu payloads
+// verbatim, so an options parameter here would silently receive them.
+async function onFileMenuPrint() {
+  await printScore();
+}
+
+async function exportAsPdf(options: { restoreFocus?: boolean } = {}) {
+  try {
+    const reply = await withPrintMode(
+      async () =>
+        await ipcService.exportWorkspaceAsPdf(selectedWorkspace.value),
+      options,
     );
 
     showExportReplyToast(
@@ -8362,13 +8335,47 @@ async function onFileMenuExportAsPdf() {
         }),
       },
     );
-  } finally {
-    printMode.value = false;
-    window.document.title = previousTitle;
-
-    // Re-focus the active element
-    focusElement(activeElement);
   }
+}
+
+async function onFileMenuExportAsPdf() {
+  await exportAsPdf();
+}
+
+function onFileMenuPrintPreview() {
+  if (
+    isLoading.value ||
+    printPreviewDialogIsOpen.value ||
+    !ipcService.isPrintPreviewSupported()
+  ) {
+    return;
+  }
+
+  // Mount the modal overlay before the editor switches into print mode.
+  printPreviewDialogIsOpen.value = true;
+}
+
+async function renderWorkspaceForPrintPreview(): Promise<RenderWorkspaceAsPdfReplyArgs> {
+  return await withPrintMode(
+    async () => await ipcService.renderWorkspaceAsPdf(selectedWorkspace.value),
+    { restoreFocus: false },
+  );
+}
+
+async function exportPdfFromPrintPreview() {
+  await exportAsPdf({ restoreFocus: false });
+}
+
+async function printFromPrintPreview() {
+  await printScore({ restoreFocus: false });
+}
+
+function updatePrintPreviewSettings(settings: PrintPreviewSettings) {
+  editorEnvironment.value.printPreviewViewMode = settings.viewMode;
+  editorEnvironment.value.printPreviewRulerIsVisible = settings.rulerIsVisible;
+  editorEnvironment.value.printPreviewZoom = settings.zoom;
+  editorEnvironment.value.printPreviewZoomFitMode = settings.zoomFitMode;
+  saveEditorEnvironmentDebounced();
 }
 
 async function onFileMenuExportAsImage() {
@@ -9927,10 +9934,12 @@ function renderTabLabel(tab: Tab) {
       :neume-keyboard="neumeKeyboard"
       :can-undo="canUndo"
       :can-redo="canRedo"
+      :print-preview-supported="ipcService.isPrintPreviewSupported()"
       @new-score="onFileMenuNewScore"
       @open-score="onClickOpenScore"
       @save-score="onFileMenuSave"
       @print-score="onClickPrintScore"
+      @print-preview="onFileMenuPrintPreview"
       @cut="onFileMenuCut"
       @copy="onFileMenuCopy"
       @paste="onFileMenuPaste"
@@ -11452,6 +11461,16 @@ function renderTabLabel(tab: Tab) {
       :paragraph-styles="score.paragraphStyles"
       :fonts="fonts"
       @update="updatePageSetup($event)"
+    />
+    <PrintPreviewDialog
+      v-if="printPreviewDialogIsOpen"
+      v-model:open="printPreviewDialogIsOpen"
+      :page-setup="score.pageSetup"
+      :settings="printPreviewSettings"
+      :render-pdf="renderWorkspaceForPrintPreview"
+      :export-pdf="exportPdfFromPrintPreview"
+      :print="printFromPrintPreview"
+      @update:settings="updatePrintPreviewSettings"
     />
     <component :is="'style'">{{ richTextParagraphStyleCss }}</component>
     <ParagraphStylesDialog

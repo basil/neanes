@@ -41,6 +41,41 @@ const libFontNodeBuiltinStub = () => {
   };
 };
 
+// The print preview is Electron-only. Stub pdf.js during web builds so its
+// lazily imported renderer and worker are not emitted or precached by the PWA.
+const pdfjsWebStub = () => {
+  const moduleStubId = '\0pdfjs-web-module-stub';
+  const workerStubId = '\0pdfjs-web-worker-stub';
+
+  return {
+    name: 'pdfjs-web-stub',
+    enforce: 'pre',
+    resolveId(source) {
+      if (source === 'pdfjs-dist') {
+        return moduleStubId;
+      }
+
+      if (source.startsWith('pdfjs-dist/build/pdf.worker.min.mjs')) {
+        return workerStubId;
+      }
+    },
+    load(id) {
+      if (id === moduleStubId) {
+        return `
+          export const GlobalWorkerOptions = {};
+          export function getDocument() {
+            throw new Error('Print Preview is not available in the browser.');
+          }
+        `;
+      }
+
+      if (id === workerStubId) {
+        return 'export default class PdfWorker {}';
+      }
+    },
+  };
+};
+
 // https://vitejs.dev/config/
 export default defineConfig(({ command, mode }) => {
   const isServe = command === 'serve';
@@ -65,6 +100,7 @@ export default defineConfig(({ command, mode }) => {
     },
     plugins: [
       libFontNodeBuiltinStub(),
+      !isElectron ? pdfjsWebStub() : undefined,
       !isElectron
         ? VitePWA({
             registerType: null, // We'll inject the service worker ourselves
@@ -195,6 +231,9 @@ export default defineConfig(({ command, mode }) => {
           ])
         : undefined,
     ],
+    worker: {
+      format: 'es',
+    },
     server:
       process.env.VSCODE_DEBUG &&
       (() => {

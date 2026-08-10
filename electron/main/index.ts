@@ -47,6 +47,8 @@ import type {
   OpenWorkspaceFromArgvArgs,
   PrintWorkspaceArgs,
   RecoverySnapshotArgs,
+  RenderWorkspaceAsPdfArgs,
+  RenderWorkspaceAsPdfReplyArgs,
   SaveWorkspaceArgs,
   SaveWorkspaceAsArgs,
   SaveWorkspaceAsReplyArgs,
@@ -873,6 +875,22 @@ function getPageSize(pageSize: PageSize, width: number, height: number) {
 let silentPdfSuccessCount = 0;
 let silentPdfFailCount = 0;
 
+// Shared by PDF export and the print-preview render so that the preview always
+// shows exactly what export produces.
+function getPrintToPdfOptions(args: RenderWorkspaceAsPdfArgs) {
+  return {
+    pageSize: getPageSize(
+      args.pageSize,
+      args.pageWidthInches,
+      args.pageHeightInches,
+    ),
+    landscape: args.landscape,
+    // Keep app chrome backgrounds out of the PDF. Score color fidelity
+    // is controlled by print-color-adjust: exact in the print stylesheet.
+    printBackground: false,
+  };
+}
+
 async function exportWorkspaceAsPdf(
   args: ExportWorkspaceAsPdfArgs,
 ): Promise<ExportWorkspaceReplyArgs> {
@@ -892,17 +910,9 @@ async function exportWorkspaceAsPdf(
 
     if (silentPdf) {
       try {
-        const data = await win.webContents.printToPDF({
-          pageSize: getPageSize(
-            args.pageSize,
-            args.pageWidthInches,
-            args.pageHeightInches,
-          ),
-          landscape: args.landscape,
-          // Keep app chrome backgrounds out of the PDF. Score color fidelity
-          // is controlled by print-color-adjust: exact in the print stylesheet.
-          printBackground: false,
-        });
+        const data = await win.webContents.printToPDF(
+          getPrintToPdfOptions(args),
+        );
         const newPath = replaceExtension(args.filePath!, 'pdf');
 
         await fs.writeFile(newPath, data);
@@ -945,17 +955,9 @@ async function exportWorkspaceAsPdf(
       }
 
       if (doWrite) {
-        const data = await win.webContents.printToPDF({
-          pageSize: getPageSize(
-            args.pageSize,
-            args.pageWidthInches,
-            args.pageHeightInches,
-          ),
-          landscape: args.landscape,
-          // Keep app chrome backgrounds out of the PDF. Score color fidelity
-          // is controlled by print-color-adjust: exact in the print stylesheet.
-          printBackground: false,
-        });
+        const data = await win.webContents.printToPDF(
+          getPrintToPdfOptions(args),
+        );
         await fs.writeFile(filePath, data);
 
         // On Linux, shell.openPath() may not resolve until the external viewer
@@ -985,6 +987,29 @@ async function exportWorkspaceAsPdf(
     } else {
       result.canceled = true;
     }
+  } catch (error) {
+    console.error(error);
+    result.errorMessage = getErrorMessage(error);
+  } finally {
+    saving = false;
+  }
+
+  return result;
+}
+
+async function renderWorkspaceAsPdf(
+  args: RenderWorkspaceAsPdfArgs,
+): Promise<RenderWorkspaceAsPdfReplyArgs> {
+  const result: RenderWorkspaceAsPdfReplyArgs = { success: false };
+
+  if (saving || !win) {
+    return result;
+  }
+
+  try {
+    saving = true;
+    result.data = await win.webContents.printToPDF(getPrintToPdfOptions(args));
+    result.success = true;
   } catch (error) {
     console.error(error);
     result.errorMessage = getErrorMessage(error);
@@ -1969,6 +1994,13 @@ function createMenu() {
             win?.webContents.send(IpcMainChannels.FileMenuPrint);
           },
         },
+        {
+          label: i18next.t(($) => $.menu.file.printPreview),
+          accelerator: 'CmdOrCtrl+Alt+P',
+          click() {
+            win?.webContents.send(IpcMainChannels.FileMenuPrintPreview);
+          },
+        },
         { type: 'separator' },
         {
           label: i18next.t(($) => $.menu.file.close),
@@ -2756,6 +2788,13 @@ ipcMain.handle(
   IpcRendererChannels.ExportWorkspaceAsPdf,
   async (event, args: ExportWorkspaceAsPdfArgs) => {
     return await exportWorkspaceAsPdf(args);
+  },
+);
+
+ipcMain.handle(
+  IpcRendererChannels.RenderWorkspaceAsPdf,
+  async (event, args: RenderWorkspaceAsPdfArgs) => {
+    return await renderWorkspaceAsPdf(args);
   },
 );
 

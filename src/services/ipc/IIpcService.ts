@@ -8,6 +8,7 @@ import type {
   ListRecoveryCandidatesReplyArgs,
   OpenWorkspaceFromArgvArgs,
   RecoverySnapshotArgs,
+  RenderWorkspaceAsPdfReplyArgs,
   SaveRecoverySnapshotReplyArgs,
   SaveWorkspaceAsReplyArgs,
   SaveWorkspaceReplyArgs,
@@ -22,6 +23,10 @@ export interface IIpcService {
   saveWorkspaceAs(workspace: Workspace): Promise<SaveWorkspaceAsReplyArgs>;
 
   exportWorkspaceAsPdf(workspace: Workspace): Promise<ExportWorkspaceReplyArgs>;
+
+  renderWorkspaceAsPdf(
+    workspace: Workspace,
+  ): Promise<RenderWorkspaceAsPdfReplyArgs>;
 
   exportWorkspaceAsHtml(
     workspace: Workspace,
@@ -73,6 +78,8 @@ export interface IIpcService {
   showItemInFolder(path: string): Promise<void>;
 
   isShowItemInFolderSupported(): boolean;
+
+  isPrintPreviewSupported(): boolean;
 
   isShowMessageBoxSupported(): boolean;
 

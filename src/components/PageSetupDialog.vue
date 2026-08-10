@@ -1612,6 +1612,7 @@ import {
   fraction2FormatOptions,
   fraction3FormatOptions,
 } from '@/utils/numberFormatOptions';
+import { applyOrientation } from '@/utils/pageOrientation';
 import { Unit } from '@/utils/Unit';
 import { withZoom } from '@/utils/withZoom';
 
@@ -2411,27 +2412,7 @@ function isTempoElement(elementType: ElementType) {
 }
 
 function updatePageSize() {
-  if (form.value.pageSize === 'Custom') {
-    if (form.value.landscape) {
-      form.value.pageWidth = form.value.pageHeightCustom;
-      form.value.pageHeight = form.value.pageWidthCustom;
-    } else {
-      form.value.pageWidth = form.value.pageWidthCustom;
-      form.value.pageHeight = form.value.pageHeightCustom;
-    }
-    return;
-  }
-
-  const pageSize = pageSizes.find((x) => x.name === form.value.pageSize);
-  if (pageSize) {
-    if (form.value.landscape) {
-      form.value.pageWidth = pageSize.height;
-      form.value.pageHeight = pageSize.width;
-    } else {
-      form.value.pageWidth = pageSize.width;
-      form.value.pageHeight = pageSize.height;
-    }
-  }
+  Object.assign(form.value, applyOrientation(form.value));
 }
 
 function updatePageSetup() {

@@ -17,6 +17,7 @@
     "exportAsMusicXml": "Экспорт в MusicXML…",
     "exportAsImage": "Экспорт как изображение…",
     "print": "Печать…",
+    "printPreview": "Предварительный просмотр…",
     "close": "Закрыть",
     "closeOthers": "Закрыть остальные"
   },

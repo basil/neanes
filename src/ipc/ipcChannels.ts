@@ -13,6 +13,7 @@ export enum IpcMainChannels {
   FileMenuNewScore = 'FileMenuNewScore',
   FileMenuOpenScore = 'FileMenuOpenScore',
   FileMenuPrint = 'FileMenuPrint',
+  FileMenuPrintPreview = 'FileMenuPrintPreview',
   FileMenuSave = 'FileMenuSave',
   FileMenuSaveAs = 'FileMenuSaveAs',
   FileMenuImportOcr = 'FileMenuImportOcr',
@@ -92,6 +93,7 @@ export enum IpcRendererChannels {
   SaveWorkspace = 'SaveWorkspace',
   SaveWorkspaceAs = 'SaveWorkspaceAs',
   ExportWorkspaceAsPdf = 'ExportWorkspaceAsPdf',
+  RenderWorkspaceAsPdf = 'RenderWorkspaceAsPdf',
   ExportWorkspaceAsHtml = 'ExportWorkspaceAsHtml',
   ExportWorkspaceAsMusicXml = 'ExportWorkspaceAsMusicXml',
   ExportWorkspaceAsLatex = 'ExportWorkspaceAsLatex',
@@ -240,13 +242,22 @@ export interface ExportWorkspaceReplyArgs {
   errorMessage?: string;
 }
 
-export interface ExportWorkspaceAsPdfArgs {
-  filePath: string | null;
-  tempFileName: string;
+export interface RenderWorkspaceAsPdfArgs {
   pageSize: PageSize;
   pageWidthInches: number;
   pageHeightInches: number;
   landscape: boolean;
+}
+
+export interface ExportWorkspaceAsPdfArgs extends RenderWorkspaceAsPdfArgs {
+  filePath: string | null;
+  tempFileName: string;
+}
+
+export interface RenderWorkspaceAsPdfReplyArgs {
+  success: boolean;
+  data?: Uint8Array;
+  errorMessage?: string;
 }
 
 export interface ExportWorkspaceAsHtmlArgs {

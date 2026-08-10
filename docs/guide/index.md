@@ -210,6 +210,14 @@ To export the score to PDF, click `File -> Export -> Export as PDF` in the main 
 
 To print, click `File -> Print` in the main menu.
 
+### Print Preview
+
+In the desktop app, click `File -> Print Preview` to inspect the actual PDF
+pages before printing or exporting. The preview toolbar can fit or zoom the
+pages, switch between single-page, facing-page, and all-page views, navigate
+the score, show a measurement ruler, and change page orientation. The Export
+button saves a PDF and the Print button opens the system print dialog.
+
 ## Page Setup
 
 To open the page setup dialog, click `File -> Page Setup` in the main menu. This dialog allows you to customize many details about the page.

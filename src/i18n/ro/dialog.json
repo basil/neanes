@@ -64,6 +64,30 @@
     "exporting": "Se exportă…",
     "export": "Exportă"
   },
+  "printPreview": {
+    "root": "Previzualizare imprimare",
+    "description": "Previzualizați paginile tipărite înainte de exportare sau imprimare.",
+    "fitWidth": "Potrivire la lățime",
+    "fitPage": "Potrivire pagină",
+    "zoom": "Zoom",
+    "zoomIn": "Mărire",
+    "zoomOut": "Micșorare",
+    "firstPage": "Prima pagină",
+    "previousPage": "Pagina precedentă",
+    "nextPage": "Pagina următoare",
+    "lastPage": "Ultima pagină",
+    "pageNumber": "Numărul paginii",
+    "pageOfTotal": "/ {{pageCount}}",
+    "singlePage": "O singură pagină",
+    "facingPages": "Pagini alăturate",
+    "allPages": "Toate paginile",
+    "showRuler": "Afișează rigla",
+    "refresh": "Reîmprospătează previzualizarea",
+    "exportPdf": "Exportă PDF",
+    "print": "Imprimă",
+    "rendering": "Se redă previzualizarea…",
+    "renderFailed": "Previzualizarea imprimării nu a putut fi redată."
+  },
   "initialMartyria": {
     "root": "Selectează mărturia inițială",
     "description": "Alege mărturia inițială."

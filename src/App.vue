@@ -229,6 +229,8 @@ onBeforeUnmount(() => {
 
   body {
     overflow: visible !important;
+    padding-right: 0 !important;
+    margin-right: 0 !important;
   }
 
   .page {
