@@ -10,6 +10,7 @@ import type {
   ListRecoveryCandidatesReplyArgs,
   OpenWorkspaceFromArgvArgs,
   RecoverySnapshotArgs,
+  RenderWorkspaceAsPdfReplyArgs,
   SaveRecoverySnapshotReplyArgs,
   SaveWorkspaceAsReplyArgs,
   SaveWorkspaceReplyArgs,
@@ -71,6 +72,16 @@ export class BrowserIpcService implements IIpcService {
     return Promise.resolve({
       success: false,
       errorMessage: 'Export workspace as PDF is not available in the browser.',
+    });
+  }
+
+  public async renderWorkspaceAsPdf(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    workspace: Workspace,
+  ): Promise<RenderWorkspaceAsPdfReplyArgs> {
+    return Promise.resolve({
+      success: false,
+      errorMessage: 'Print Preview is not available in the browser.',
     });
   }
 
@@ -217,6 +228,10 @@ export class BrowserIpcService implements IIpcService {
   }
 
   public isShowItemInFolderSupported(): boolean {
+    return false;
+  }
+
+  public isPrintPreviewSupported(): boolean {
     return false;
   }
 

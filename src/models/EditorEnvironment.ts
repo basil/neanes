@@ -1,6 +1,7 @@
 import type { ZoomFitMode } from '@/models/Workspace';
 import type { PaneEdge, WorkspacePaneId } from '@/models/WorkspacePane';
 import { workspacePaneDefinitions } from '@/models/WorkspacePane';
+import type { PrintPreviewViewMode } from '@/utils/printPreview';
 
 export const DEFAULT_PANE_ACCORDION_STATE: Partial<
   Record<WorkspacePaneId, string[]>
@@ -37,6 +38,10 @@ export type PersistedEditorEnvironment = Partial<{
   statusBarIsVisible: false;
   paneLayout: EditorPaneLayout;
   paneAccordionState: PaneAccordionState;
+  printPreviewViewMode: PrintPreviewViewMode;
+  printPreviewRulerIsVisible: true;
+  printPreviewZoom: number;
+  printPreviewZoomFitMode: ZoomFitMode | null;
 }>;
 
 export class EditorEnvironment {
@@ -45,6 +50,10 @@ export class EditorEnvironment {
   statusBarIsVisible = true;
   paneLayout: EditorPaneLayout | null = null;
   paneAccordionState: PaneAccordionState = {};
+  printPreviewViewMode: PrintPreviewViewMode = 'single';
+  printPreviewRulerIsVisible = false;
+  printPreviewZoom = 1;
+  printPreviewZoomFitMode: ZoomFitMode | null = 'whole-page';
 
   static createFrom(data: PersistedEditorEnvironment) {
     return Object.assign(new EditorEnvironment(), data);
@@ -56,6 +65,18 @@ export class EditorEnvironment {
       ...(this.statusBarIsVisible ? {} : { statusBarIsVisible: false }),
       ...persistPaneLayout(this.paneLayout),
       ...persistPaneAccordionState(this.paneAccordionState),
+      ...(this.printPreviewViewMode === 'single'
+        ? {}
+        : { printPreviewViewMode: this.printPreviewViewMode }),
+      ...(this.printPreviewRulerIsVisible
+        ? { printPreviewRulerIsVisible: true as const }
+        : {}),
+      ...(this.printPreviewZoom === 1
+        ? {}
+        : { printPreviewZoom: this.printPreviewZoom }),
+      ...(this.printPreviewZoomFitMode === 'whole-page'
+        ? {}
+        : { printPreviewZoomFitMode: this.printPreviewZoomFitMode }),
     };
   }
 }

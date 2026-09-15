@@ -40,6 +40,18 @@
                 <PhPrinter weight="duotone" />
               </ToolbarButton>
             </AppTooltip>
+            <AppTooltip
+              v-if="printPreviewSupported"
+              :tooltip="$t(($) => $.menu.file.printPreview, { ns: 'menu' })"
+            >
+              <ToolbarButton
+                variant="secondary"
+                class="chrome-button toolbar-icon"
+                @click="$emit('print-preview')"
+              >
+                <PhFileMagnifyingGlass weight="duotone" />
+              </ToolbarButton>
+            </AppTooltip>
           </div>
           <ToolbarSeparator class="toolbar-leading-separator" />
           <div class="toolbar-leading-section toolbar-leading-section-right">
@@ -470,6 +482,7 @@ import {
   PhClipboardText,
   PhCopy,
   PhFile,
+  PhFileMagnifyingGlass,
   PhFilePlus,
   PhFloppyDisk,
   PhFolderOpen,
@@ -611,6 +624,10 @@ const props = defineProps({
     type: Boolean,
     required: true,
   },
+  printPreviewSupported: {
+    type: Boolean,
+    required: true,
+  },
 });
 
 const emit = defineEmits([
@@ -634,6 +651,7 @@ const emit = defineEmits([
   'paste',
   'play-audio',
   'print-score',
+  'print-preview',
   'redo',
   'save-score',
   'toggle-line-break',

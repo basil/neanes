@@ -14,6 +14,8 @@ import type {
   OpenWorkspaceFromArgvArgs,
   PrintWorkspaceArgs,
   RecoverySnapshotArgs,
+  RenderWorkspaceAsPdfArgs,
+  RenderWorkspaceAsPdfReplyArgs,
   SaveRecoverySnapshotReplyArgs,
   SaveWorkspaceArgs,
   SaveWorkspaceAsArgs,
@@ -61,14 +63,31 @@ export class IpcService implements IIpcService {
       {
         filePath: workspace.filePath,
         tempFileName: workspace.tempFileName,
-        landscape: workspace.score.pageSetup.landscape,
-        pageSize: workspace.score.pageSetup.pageSize,
-        pageWidthInches: Unit.toInch(workspace.score.pageSetup.pageWidthCustom),
-        pageHeightInches: Unit.toInch(
-          workspace.score.pageSetup.pageHeightCustom,
-        ),
+        ...this.getRenderWorkspaceAsPdfArgs(workspace),
       } as ExportWorkspaceAsPdfArgs,
     );
+  }
+
+  public async renderWorkspaceAsPdf(
+    workspace: Workspace,
+  ): Promise<RenderWorkspaceAsPdfReplyArgs> {
+    return await window.ipcRenderer.invoke(
+      IpcRendererChannels.RenderWorkspaceAsPdf,
+      this.getRenderWorkspaceAsPdfArgs(workspace),
+    );
+  }
+
+  private getRenderWorkspaceAsPdfArgs(
+    workspace: Workspace,
+  ): RenderWorkspaceAsPdfArgs {
+    const pageSetup = workspace.score.pageSetup;
+
+    return {
+      landscape: pageSetup.landscape,
+      pageSize: pageSetup.pageSize,
+      pageWidthInches: Unit.toInch(pageSetup.pageWidthCustom),
+      pageHeightInches: Unit.toInch(pageSetup.pageHeightCustom),
+    };
   }
 
   public async exportWorkspaceAsImage(
@@ -209,6 +228,10 @@ export class IpcService implements IIpcService {
   }
 
   public isShowItemInFolderSupported(): boolean {
+    return true;
+  }
+
+  public isPrintPreviewSupported(): boolean {
     return true;
   }
 

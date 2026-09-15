@@ -64,6 +64,30 @@
     "exporting": "Exporting…",
     "export": "Export"
   },
+  "printPreview": {
+    "root": "Print Preview",
+    "description": "Preview the printed pages before exporting or printing.",
+    "fitWidth": "Fit Width",
+    "fitPage": "Fit Page",
+    "zoom": "Zoom",
+    "zoomIn": "Zoom In",
+    "zoomOut": "Zoom Out",
+    "firstPage": "First Page",
+    "previousPage": "Previous Page",
+    "nextPage": "Next Page",
+    "lastPage": "Last Page",
+    "pageNumber": "Page Number",
+    "pageOfTotal": "/ {{pageCount}}",
+    "singlePage": "Single Page",
+    "facingPages": "Facing Pages",
+    "allPages": "All Pages",
+    "showRuler": "Show Ruler",
+    "refresh": "Refresh Preview",
+    "exportPdf": "Export PDF",
+    "print": "Print",
+    "rendering": "Rendering preview…",
+    "renderFailed": "Unable to render the print preview."
+  },
   "initialMartyria": {
     "root": "Select Initial Martyria",
     "description": "Choose an initial martyria."

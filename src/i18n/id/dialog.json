@@ -64,6 +64,30 @@
     "exporting": "Mengekspor…",
     "export": "Ekspor"
   },
+  "printPreview": {
+    "root": "Pratinjau Cetak",
+    "description": "Pratinjau halaman cetak sebelum mengekspor atau mencetak.",
+    "fitWidth": "Sesuaikan Lebar",
+    "fitPage": "Sesuaikan Halaman",
+    "zoom": "Perbesaran",
+    "zoomIn": "Perbesar",
+    "zoomOut": "Perkecil",
+    "firstPage": "Halaman Pertama",
+    "previousPage": "Halaman Sebelumnya",
+    "nextPage": "Halaman Berikutnya",
+    "lastPage": "Halaman Terakhir",
+    "pageNumber": "Nomor Halaman",
+    "pageOfTotal": "/ {{pageCount}}",
+    "singlePage": "Satu Halaman",
+    "facingPages": "Halaman Berhadapan",
+    "allPages": "Semua Halaman",
+    "showRuler": "Tampilkan Penggaris",
+    "refresh": "Segarkan Pratinjau",
+    "exportPdf": "Ekspor PDF",
+    "print": "Cetak",
+    "rendering": "Merender pratinjau…",
+    "renderFailed": "Tidak dapat merender pratinjau cetak."
+  },
   "initialMartyria": {
     "root": "Pilih Martyria Awal",
     "description": "Pilih martyria awal."

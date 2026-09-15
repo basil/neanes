@@ -50,6 +50,19 @@ export const ZOOM_LEVELS = generateZoomLevels();
 export const MIN_ZOOM = ZOOM_LEVELS[0];
 export const MAX_ZOOM = ZOOM_LEVELS[ZOOM_LEVELS.length - 1];
 
+// Tolerance for comparing zoom factors, which accumulate floating-point noise.
+export const ZOOM_EPSILON = 0.000001;
+
+export function findZoomStep(
+  levels: readonly number[],
+  zoom: number,
+  direction: 1 | -1,
+) {
+  return direction > 0
+    ? levels.find((level) => level > zoom + ZOOM_EPSILON)
+    : levels.findLast((level) => level < zoom - ZOOM_EPSILON);
+}
+
 export function formatZoomPercent(zoom: number) {
   return `${formatNumber(zoom * 100)}%`;
 }
