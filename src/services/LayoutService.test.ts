@@ -9,12 +9,17 @@ import {
   TempoElement,
   TextBoxElement,
 } from '../models/Element';
-import { Fthora, QuantitativeNeume, restNeumes } from '../models/Neumes';
-import { Line } from '../models/Page';
+import {
+  Fthora,
+  GorgonNeume,
+  Ison,
+  QuantitativeNeume,
+  restNeumes,
+} from '../models/Neumes';
+import { Line, Page } from '../models/Page';
 import { PageSetup } from '../models/PageSetup';
 import { Scale } from '../models/Scales';
 import { LayoutService } from './LayoutService';
-
 const itif = (condition: boolean) => (condition ? it : it.skip);
 
 describe('LayoutService.calculateMartyriae', () => {
@@ -292,6 +297,175 @@ describe.each([true, false])(
     });
   },
 );
+
+describe('LayoutService movable mark collisions', () => {
+  const movingBox = { left: 0, right: 1, top: 0, bottom: 1 };
+  const lowerObstacle = { left: 0, right: 1, top: 0.8, bottom: 1.8 };
+
+  it.each([
+    {
+      name: 'stops in a gap below a higher obstacle',
+      fixedBoxes: [lowerObstacle, { left: 0, right: 1, top: -2, bottom: -1 }],
+      expectedY: -0.25,
+    },
+    {
+      name: 'continues upward when the first move encounters another obstacle',
+      fixedBoxes: [
+        { left: 0, right: 1, top: -0.8, bottom: -0.2 },
+        lowerObstacle,
+      ],
+      expectedY: -1.85,
+    },
+    {
+      name: 'ignores obstacles outside the horizontal span',
+      fixedBoxes: [
+        lowerObstacle,
+        { left: 1, right: 2, top: -0.8, bottom: -0.3 },
+      ],
+      expectedY: -0.25,
+    },
+    {
+      name: 'leaves an already clear mark in place',
+      fixedBoxes: [{ left: 0, right: 1, top: -2, bottom: -1 }],
+      expectedY: null,
+    },
+    {
+      name: 'rechecks a gap closed by font-unit rounding',
+      fixedBoxes: [
+        { left: 0, right: 1, top: 0.7996, bottom: 1.8 },
+        { left: 0, right: 1, top: -1, bottom: -0.3005 },
+      ],
+      expectedY: -2.05,
+    },
+  ])('$name', ({ fixedBoxes, expectedY }) => {
+    const result = LayoutService['resolveMovableCollisionPlacement'](
+      { x: null, y: null },
+      [movingBox],
+      ['right', 'left'],
+      0.05,
+      {
+        collisionBoxes: [movingBox, ...fixedBoxes],
+        fixedBoxes,
+        baseBounds: movingBox,
+      },
+    );
+
+    expect(result).toEqual({ x: null, y: expectedY });
+  });
+
+  it('still prefers a sideways move that fits inside the base', () => {
+    const fixedBoxes = [{ left: 0, right: 0.2, top: 0, bottom: 1 }];
+    const result = LayoutService['resolveMovableCollisionPlacement'](
+      { x: null, y: null },
+      [movingBox],
+      ['right', 'left'],
+      0.05,
+      {
+        collisionBoxes: [movingBox, ...fixedBoxes],
+        fixedBoxes,
+        baseBounds: { left: 0, right: 2, top: 0, bottom: 1 },
+      },
+    );
+
+    expect(result).toEqual({ x: 0.25, y: null });
+  });
+});
+
+describe('LayoutService.alignIsonIndicators', () => {
+  it.each([-0.8, -0.6, -0.4, -0.2, 0])(
+    'keeps aligned isons clear with a gorgon offset of %s',
+    (gorgonOffsetY) => {
+      const pageSetup = new PageSetup();
+      pageSetup.neumeDefaultFontFamily = 'Neanes';
+      const notes = [-0.1, gorgonOffsetY].map((offsetY) => {
+        const note = new NoteElement();
+        note.quantitativeNeume = QuantitativeNeume.Oligon;
+        note.ison = Ison.Unison;
+        note.gorgonNeume = GorgonNeume.Gorgon_Top;
+        note.gorgonNeumeOffsetY = offsetY;
+        return note;
+      });
+      const page = new Page();
+      page.lines = [getLine(...notes)];
+
+      LayoutService.alignIsonIndicators([page], pageSetup);
+      LayoutService['resolveAlignedIsonNoteMarkCollisionsForElements'](
+        notes,
+        pageSetup,
+      );
+
+      expect(notes[0].computedIsonOffsetY).toBe(notes[1].computedIsonOffsetY);
+      for (const note of notes) {
+        const context = LayoutService['getNoteMarkCollisionContext'](
+          note,
+          pageSetup,
+        );
+        const placement = LayoutService['getMovableNoteMarkPlacement'](
+          note,
+          LayoutService['getMovableMarkSpec']('ison'),
+          context,
+        );
+
+        expect(placement.shiftX).toBe(0);
+        expect(placement.shiftY).toBe(0);
+        expect(note.isonOffsetY).toBeNull();
+      }
+    },
+  );
+
+  it.each([
+    [null, null, 0],
+    [-0.05, -0.25, -0.25],
+  ])(
+    'aligns ison indicators with authored offsets %s and %s',
+    (firstY, secondY, expectedY) => {
+      const pageSetup = new PageSetup();
+      pageSetup.neumeDefaultFontFamily = 'Neanes';
+
+      const note1 = new NoteElement();
+      note1.quantitativeNeume = QuantitativeNeume.Ison;
+      note1.ison = Ison.Unison;
+      note1.isonOffsetY = firstY;
+
+      const note2 = new NoteElement();
+      note2.quantitativeNeume = QuantitativeNeume.Oligon;
+      note2.ison = Ison.Unison;
+      note2.isonOffsetY = secondY;
+
+      const page = new Page();
+      page.lines = [getLine(note1, note2)];
+
+      LayoutService.alignIsonIndicators([page], pageSetup);
+
+      // Both glyphs have the same ison anchor in Neanes. Alignment moves both
+      // indicators to the higher authored position without changing the source.
+      expect(note1.computedIsonOffsetY).toBeCloseTo(expectedY);
+      expect(note2.computedIsonOffsetY).toBeCloseTo(expectedY);
+      expect(note1.isonOffsetY).toBe(firstY);
+      expect(note2.isonOffsetY).toBe(secondY);
+    },
+  );
+
+  it('leaves notes without ison indicators alone', () => {
+    const note = new NoteElement();
+    note.ison = null;
+    const page = new Page();
+    page.lines = [getLine(note)];
+
+    LayoutService.alignIsonIndicators([page], new PageSetup());
+
+    expect(note.computedIsonOffsetY).toBeNull();
+  });
+
+  it('handles empty pages', () => {
+    const page = new Page();
+    page.lines = [];
+
+    expect(() =>
+      LayoutService.alignIsonIndicators([page], new PageSetup()),
+    ).not.toThrow();
+  });
+});
 
 describe('LayoutService.applyRuntPenalty', () => {
   it.each(restNeumes)(

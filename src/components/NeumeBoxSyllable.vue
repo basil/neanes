@@ -112,6 +112,8 @@ import {
   VocalExpressionNeume,
 } from '@/models/Neumes';
 import type { PageSetup } from '@/models/PageSetup';
+import type { MovableMarkKey } from '@/utils/noteMarkOffsets';
+import { getEffectiveNoteMarkOffset } from '@/utils/noteMarkOffsets';
 import { withZoom } from '@/utils/withZoom';
 
 const props = defineProps({
@@ -184,14 +186,17 @@ const hasMeasureNumber = computed(() => props.note.measureNumber != null);
 const hasIson = computed(() => props.note.ison != null);
 const hasTie = computed(() => props.note.tie != null);
 
-function offsetStyle(
-  left: number | null | undefined,
-  top: number | null | undefined,
-) {
+function offsetStyle(left: number | null, top: number | null) {
   return {
     left: left != null ? `${left}em` : undefined,
     top: top != null ? `${top}em` : undefined,
   };
+}
+
+function noteMarkOffsetStyle(markKey: MovableMarkKey) {
+  const offset = getEffectiveNoteMarkOffset(props.note, markKey);
+
+  return offsetStyle(offset.x, offset.y);
 }
 
 const style = computed(() => {
@@ -233,7 +238,7 @@ const fthoraStyle = computed(() => {
   return {
     color: props.pageSetup.fthoraDefaultColor,
     webkitTextStrokeWidth: withZoom(props.pageSetup.fthoraDefaultStrokeWidth),
-    ...offsetStyle(props.note.fthoraOffsetX, props.note.fthoraOffsetY),
+    ...noteMarkOffsetStyle('fthora'),
   } as StyleValue;
 });
 
@@ -241,10 +246,7 @@ const secondaryFthoraStyle = computed(() => {
   return {
     color: props.pageSetup.fthoraDefaultColor,
     webkitTextStrokeWidth: withZoom(props.pageSetup.fthoraDefaultStrokeWidth),
-    ...offsetStyle(
-      props.note.secondaryFthoraOffsetX,
-      props.note.secondaryFthoraOffsetY,
-    ),
+    ...noteMarkOffsetStyle('secondaryFthora'),
   } as StyleValue;
 });
 
@@ -252,10 +254,7 @@ const tertiaryFthoraStyle = computed(() => {
   return {
     color: props.pageSetup.fthoraDefaultColor,
     webkitTextStrokeWidth: withZoom(props.pageSetup.fthoraDefaultStrokeWidth),
-    ...offsetStyle(
-      props.note.tertiaryFthoraOffsetX,
-      props.note.tertiaryFthoraOffsetY,
-    ),
+    ...noteMarkOffsetStyle('tertiaryFthora'),
   } as StyleValue;
 });
 
@@ -387,7 +386,7 @@ const isonStyle = computed(() => {
   return {
     color: props.pageSetup.isonDefaultColor,
     webkitTextStrokeWidth: withZoom(props.pageSetup.isonDefaultStrokeWidth),
-    ...offsetStyle(props.note.isonOffsetX, props.note.computedIsonOffsetY),
+    ...noteMarkOffsetStyle('ison'),
   } as StyleValue;
 });
 
@@ -418,7 +417,7 @@ const koronisStyle = computed(() => {
   return {
     color: props.pageSetup.koronisDefaultColor,
     webkitTextStrokeWidth: withZoom(props.pageSetup.koronisDefaultStrokeWidth),
-    ...offsetStyle(props.note.koronisOffsetX, props.note.koronisOffsetY),
+    ...noteMarkOffsetStyle('koronis'),
   } as StyleValue;
 });
 

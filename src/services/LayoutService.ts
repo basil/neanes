@@ -42,6 +42,7 @@ import type {
   LineLayoutDiagnostics,
 } from '@/models/LayoutDiagnostics';
 import {
+  getSecondaryNeume,
   isMeasureBarAboveVariant,
   measureBarAboveToLeft,
   measureBarLeftToAbove,
@@ -92,6 +93,12 @@ import { TATWEEL } from '@/utils/constants';
 import type { ResolvedFontStyle } from '@/utils/fontStyle';
 import { resolveFontCss, resolveFontStyle } from '@/utils/fontStyle';
 import { lowRootSignMap } from '@/utils/NeumeUtils';
+import type { MovableMarkKey, NoteMarkOffset } from '@/utils/noteMarkOffsets';
+import {
+  getAuthoredNoteMarkOffset,
+  getEffectiveNoteMarkOffset,
+  setComputedNoteMarkOffset,
+} from '@/utils/noteMarkOffsets';
 import type { ResolvedPageMargins } from '@/utils/PageMargins';
 import { resolvePageMargins } from '@/utils/PageMargins';
 import type { RunningMarkerPageMetadata } from '@/utils/runningMarkers';
@@ -111,6 +118,7 @@ const fontBoundingBoxDescentCache = new Map<string, number>();
 const textWidthCache = new Map<string, number>();
 const neumeWidthCache = new Map<string, number>();
 const noteInkBoundsCache = new Map<string, InkBounds>();
+const emptyMeasureBarWidthMap = new Map<MeasureBar, number>();
 const emptyElementWidth = 39;
 const idealMaxAdjustmentRatio = 1;
 const adjustmentRatioCapStep = 0.05;
@@ -241,6 +249,13 @@ const secondaryGorgonNeumeSet = new Set<GorgonNeume>([
   GorgonNeume.GorgonSecondary,
 ]);
 
+const fontUnitsPerEm = 1000;
+const isonIndicatorAnchorName = 'isonIndicator';
+const gorgonTopAnchorName = 'gorgonTop';
+const gorgonSecondaryAnchorName = 'gorgonSecondary';
+const stackedMarkCollisionClearance = 50 / fontUnitsPerEm;
+const alignedMarkCollisionClearance = 0;
+
 interface GetNoteWidthArgs {
   lyricsVerticalOffset: number;
   measureBarWidthMap: Map<MeasureBar, number>;
@@ -273,6 +288,7 @@ interface LayoutDiagnosticsCollector {
 
 interface LayoutWorkspace {
   pageSetup: PageSetup;
+  noteCollisionSpacing: Map<NoteElement, number>;
 
   // The paragraph whose construction is currently in progress. Once a paragraph
   // has been constructed, it is broken into lines and we begin constructing the
@@ -335,6 +351,7 @@ interface NoteGlyphBox {
   top: number;
   bottom: number;
   collisionKind?: NoteCollisionGlyph['kind'];
+  movableMarkKey?: MovableMarkKey;
 }
 
 interface NoteCollisionGlyph {
@@ -344,7 +361,106 @@ interface NoteCollisionGlyph {
   y: number;
   offsetX?: number | null;
   offsetY?: number | null;
+  anchorName?: string;
+  movableMarkKey?: MovableMarkKey;
 }
+
+interface NoteCollisionGlyphLayout {
+  fontFamily: string;
+  fontSize: number;
+  glyphs: NoteCollisionGlyph[];
+  resolvedGlyphNames: SbmuflGlyphName[];
+  baseGlyphName: SbmuflGlyphName;
+}
+
+interface NoteCollisionMark {
+  neume: Neume;
+  offsetX: number | null;
+  offsetY: number | null;
+  anchorName?: string;
+  movableMarkKey?: MovableMarkKey;
+}
+
+type NoteCollisionMarkOptions = Pick<
+  NoteCollisionMark,
+  'anchorName' | 'movableMarkKey'
+>;
+
+interface NoteMarkSlot extends NoteCollisionMarkOptions {
+  neume: (note: NoteElement) => Neume | null;
+  offset: (note: NoteElement) => NoteMarkOffset;
+}
+
+type CollisionShiftDirection = 'left' | 'right';
+
+interface MovableMarkSpec {
+  key: MovableMarkKey;
+  horizontalClearance: number;
+  getNeume: (noteElement: NoteElement) => Neume | null;
+  getHorizontalDirections: (
+    noteElement: NoteElement,
+  ) => readonly CollisionShiftDirection[];
+}
+
+interface NoteMarkCollisionContext {
+  collisionBoxes: NoteGlyphBox[];
+  fixedBoxes: NoteGlyphBox[];
+  baseBounds: NoteGlyphBox;
+}
+
+interface MovableMarkPlacement {
+  finalOffset: NoteMarkOffset;
+  markBoxes: NoteGlyphBox[];
+  shiftX: number;
+  shiftY: number;
+}
+
+const bidirectionalCollisionShiftDirections: readonly CollisionShiftDirection[] =
+  ['right', 'left'];
+const rightOnlyCollisionShiftDirections: readonly CollisionShiftDirection[] = [
+  'right',
+];
+const defaultMovableMarkDirections = (noteElement: NoteElement) =>
+  getSecondaryNeume(noteElement.quantitativeNeume) == null
+    ? bidirectionalCollisionShiftDirections
+    : rightOnlyCollisionShiftDirections;
+const movableMarkSpecs: readonly MovableMarkSpec[] = [
+  {
+    key: 'fthora',
+    horizontalClearance: stackedMarkCollisionClearance,
+    getNeume: (noteElement) => noteElement.fthora,
+    getHorizontalDirections: defaultMovableMarkDirections,
+  },
+  {
+    key: 'secondaryFthora',
+    horizontalClearance: stackedMarkCollisionClearance,
+    getNeume: (noteElement) => noteElement.secondaryFthora,
+    getHorizontalDirections: () => rightOnlyCollisionShiftDirections,
+  },
+  {
+    key: 'tertiaryFthora',
+    horizontalClearance: stackedMarkCollisionClearance,
+    getNeume: (noteElement) => noteElement.tertiaryFthora,
+    getHorizontalDirections: () => rightOnlyCollisionShiftDirections,
+  },
+  {
+    key: 'koronis',
+    horizontalClearance: stackedMarkCollisionClearance,
+    getNeume: (noteElement) => (noteElement.koronis ? TimeNeume.Koronis : null),
+    getHorizontalDirections: defaultMovableMarkDirections,
+  },
+  {
+    key: 'ison',
+    horizontalClearance: alignedMarkCollisionClearance,
+    getNeume: (noteElement) => noteElement.ison,
+    getHorizontalDirections: defaultMovableMarkDirections,
+  },
+];
+const movableMarkSpecsByKey: ReadonlyMap<MovableMarkKey, MovableMarkSpec> =
+  new Map(movableMarkSpecs.map((spec) => [spec.key, spec] as const));
+const alignedIsonFixedMovableMarkKeys: ReadonlySet<MovableMarkKey> = new Set(
+  movableMarkSpecs.map((spec) => spec.key).filter((key) => key !== 'ison'),
+);
 
 type MeasureBarAnchorEdge = 'left' | 'right';
 
@@ -378,6 +494,47 @@ export class LayoutService {
       this.saveElementState(element);
     });
 
+    // Keep requirements from earlier passes when a new line break changes
+    // ison alignment. Spacing can grow, but must not oscillate between layouts.
+    const noteCollisionSpacing = new Map<NoteElement, number>();
+    let pages: Page[];
+    let spacingChanged: boolean;
+
+    do {
+      pages = this.layoutPages(workspace, noteCollisionSpacing, options);
+      spacingChanged = this.updateFinalNoteCollisionSpacing(
+        pages,
+        pageSetup,
+        noteCollisionSpacing,
+      );
+    } while (spacingChanged);
+
+    const measureBarWidthMap = this.getMeasureBarWidthMap(pageSetup);
+    this.centerMeasureBars(pages, pageSetup, measureBarWidthMap);
+    this.addMelismas(
+      pages,
+      pageSetup,
+      this.getDefaultLyricsFont(score.paragraphStyles),
+      measureBarWidthMap,
+    );
+
+    elements.forEach((element) => this.checkElementState(element));
+    score.headersAndFooters.forEach((element) => {
+      this.checkElementState(element);
+    });
+
+    return pages;
+  }
+
+  private static layoutPages(
+    workspace: Workspace,
+    noteCollisionSpacing: Map<NoteElement, number>,
+    options?: LayoutDiagnosticsOptions,
+  ): Page[] {
+    const score = workspace.score;
+    const pageSetup = score.pageSetup;
+    const elements = score.staff.elements;
+
     this.calculateMartyriae(elements, pageSetup);
 
     // Always make sure this is an empty element at the end of the score.
@@ -389,6 +546,7 @@ export class LayoutService {
 
     const layoutWorkspace: LayoutWorkspace = {
       pageSetup,
+      noteCollisionSpacing,
       pendingParagraph: [],
       neumesEndPx: 0,
       lyricsEndPx: LayoutService.getInitialLyricsEndPx(pageSetup),
@@ -1801,26 +1959,21 @@ export class LayoutService {
       page.lines[page.lines.length - 1].paragraphEnd = true;
     }
 
-    this.centerMeasureBars(pages, pageSetup, measureBarWidthMap);
-    this.addMelismas(
-      pages,
-      pageSetup,
-      defaultLyricsFontCss,
-      measureBarWidthMap,
-    );
-
     if (pageSetup.alignIsonIndicators) {
       this.alignIsonIndicators(pages, pageSetup);
     }
 
-    // Record element updates
-    elements.forEach((element) => {
-      this.checkElementState(element);
-    });
-
-    score.headersAndFooters.forEach((element) => {
-      this.checkElementState(element);
-    });
+    // Ison alignment and transferred measure bars are line-dependent, so run
+    // movable mark collisions one final time after line construction.
+    for (const page of pages) {
+      for (const line of page.lines) {
+        this.resolveNoteMarkCollisionsForElements(
+          line.elements,
+          pageSetup,
+          pageSetup.alignIsonIndicators,
+        );
+      }
+    }
 
     if (layoutWorkspace.loggingEnabled) {
       console.log(
@@ -2811,6 +2964,8 @@ export class LayoutService {
 
       this.applyPunctuationHorizontalOffset(noteElement, pageSetup);
     }
+
+    this.resolveNoteMarkCollisionsForElements(elements, pageSetup, false);
   }
 
   private static applyPunctuationHorizontalOffset(
@@ -3159,37 +3314,28 @@ export class LayoutService {
     const leftTuck = leftProjection;
     const rightTuck = Math.min(rightProjection, nextOverhangs.left);
     const inlineSpacing = this.getInlineSpacing(workspace.pageSetup);
-    const noteVisualMinimumWidth = this.getNoteVisualMinimumSpacing(
-      noteElement,
-      nextNoteElement,
-      workspace.pageSetup,
-      measureBarWidthMap,
-      inlineSpacing,
+    const noteVisualMinimumWidth = Math.max(
+      workspace.noteCollisionSpacing.get(noteElement) ?? 0,
+      this.getNoteBoundaryCollisionSpacing(
+        noteElement,
+        nextNoteElement,
+        workspace.pageSetup,
+        measureBarWidthMap,
+      ),
     );
+    workspace.noteCollisionSpacing.set(noteElement, noteVisualMinimumWidth);
     // A zero visual minimum is the collision helper's generic lower clamp,
     // not a real geometry requirement when the user deliberately requests
     // negative spacing.
     const hasOnlyGenericVisualClamp =
       inlineSpacing < 0 && noteVisualMinimumWidth <= 0;
-    // The visual and measure-bar helpers below both measure the total
-    // same-line distance between note boxes. m_i intentionally excludes
+    // The collision requirement measures the total same-line distance
+    // between note boxes. m_i intentionally excludes
     // L_{i+1}, so subtract the tuck to convert those widths into m_i space,
     // or long lyrics on the next note can no longer tuck left.
     const visualMinimumWidth = hasOnlyGenericVisualClamp
       ? null
       : noteVisualMinimumWidth - leftTuck;
-    const hasVisibleMeasureBar = this.hasVisibleMeasureBarAtBoundary(
-      noteElement,
-      nextNoteElement,
-    );
-    const measureBarMinimumWidth = hasVisibleMeasureBar
-      ? this.getMeasureBarMinimumGlueWidth(
-          noteElement,
-          nextNoteElement,
-          workspace.pageSetup,
-          measureBarWidthMap,
-        ) - leftTuck
-      : null;
     const ordinaryBaseWidth =
       inlineSpacing + rightProjection - leftTuck - rightTuck;
 
@@ -3228,7 +3374,6 @@ export class LayoutService {
 
     return this.resolvePreferredInterNoteSpacing(baseWidth, [
       visualMinimumWidth,
-      measureBarMinimumWidth,
       lyricMinimumWidth,
       melismaMinimumWidth,
     ]);
@@ -3344,6 +3489,73 @@ export class LayoutService {
     );
   }
 
+  private static getNoteBoundaryCollisionSpacing(
+    left: NoteElement,
+    right: NoteElement,
+    pageSetup: PageSetup,
+    measureBarWidthMap: Map<MeasureBar, number>,
+  ) {
+    return Math.max(
+      this.getNoteVisualMinimumSpacing(
+        left,
+        right,
+        pageSetup,
+        measureBarWidthMap,
+        this.getInlineSpacing(pageSetup),
+      ),
+      this.hasVisibleMeasureBarAtBoundary(left, right)
+        ? this.getMeasureBarMinimumGlueWidth(
+            left,
+            right,
+            pageSetup,
+            measureBarWidthMap,
+          )
+        : 0,
+    );
+  }
+
+  private static updateFinalNoteCollisionSpacing(
+    pages: Page[],
+    pageSetup: PageSetup,
+    noteCollisionSpacing: Map<NoteElement, number>,
+  ) {
+    const measureBarWidthMap = this.getMeasureBarWidthMap(pageSetup);
+    let changed = false;
+
+    for (const page of pages) {
+      for (const line of page.lines) {
+        for (let i = 0; i + 1 < line.elements.length; i++) {
+          const left = line.elements[i];
+          const right = line.elements[i + 1];
+
+          if (
+            left.elementType !== ElementType.Note ||
+            right.elementType !== ElementType.Note
+          ) {
+            continue;
+          }
+
+          const leftNote = left as NoteElement;
+          const requiredSpacing = this.getNoteBoundaryCollisionSpacing(
+            leftNote,
+            right as NoteElement,
+            pageSetup,
+            measureBarWidthMap,
+          );
+
+          // Compare preferred widths, not justified positions: the existing
+          // line breaker deliberately allows collision spacing to shrink.
+          if (requiredSpacing > (noteCollisionSpacing.get(leftNote) ?? 0)) {
+            noteCollisionSpacing.set(leftNote, requiredSpacing);
+            changed = true;
+          }
+        }
+      }
+    }
+
+    return changed;
+  }
+
   private static getMartyriaBoxWidth(martyriaElement: MartyriaElement) {
     return (
       martyriaElement.neumeWidth +
@@ -3390,15 +3602,229 @@ export class LayoutService {
     return left.top < right.bottom && right.top < left.bottom;
   }
 
+  private static noteGlyphBoxesHorizontallyOverlap(
+    left: NoteGlyphBox,
+    right: NoteGlyphBox,
+  ) {
+    return left.left < right.right && right.left < left.right;
+  }
+
   private static noteGlyphBoxesOverlap(
     left: NoteGlyphBox,
     right: NoteGlyphBox,
   ) {
     return (
-      left.left < right.right &&
-      right.left < left.right &&
+      this.noteGlyphBoxesHorizontallyOverlap(left, right) &&
       this.noteGlyphBoxesVerticallyOverlap(left, right)
     );
+  }
+
+  private static resolveMovableCollisionPlacement(
+    placement: NoteMarkOffset,
+    movingBoxes: NoteGlyphBox[],
+    horizontalDirections: readonly CollisionShiftDirection[],
+    horizontalClearance: number,
+    context: NoteMarkCollisionContext,
+    allowVerticalShift = true,
+  ): NoteMarkOffset {
+    if (movingBoxes.length === 0) {
+      return placement;
+    }
+
+    const horizontalPlacement =
+      this.tryGetContainedHorizontalCollisionPlacement(
+        context.fixedBoxes,
+        movingBoxes,
+        context.baseBounds,
+        horizontalClearance,
+        placement,
+        horizontalDirections,
+      );
+
+    if (horizontalPlacement != null) {
+      return horizontalPlacement;
+    }
+
+    if (!allowVerticalShift) {
+      return placement;
+    }
+
+    // Recheck after each upward move so we stop in the first available gap,
+    // but continue if the move encounters another obstacle.
+    const shiftY = this.getMinimumCollisionShift(
+      context.fixedBoxes,
+      movingBoxes,
+      Math.min,
+      (fixedBox, movingBox, currentShiftY) => {
+        const hasInsufficientClearance =
+          this.noteGlyphBoxesHorizontallyOverlap(fixedBox, movingBox) &&
+          fixedBox.top - stackedMarkCollisionClearance <
+            movingBox.bottom + currentShiftY &&
+          movingBox.top + currentShiftY <
+            fixedBox.bottom + stackedMarkCollisionClearance;
+
+        if (!hasInsufficientClearance) {
+          return null;
+        }
+
+        // Include quantization in the search in case it closes a narrow gap.
+        return (
+          this.getShiftedCollisionOffset(
+            placement.y,
+            fixedBox.top - stackedMarkCollisionClearance - movingBox.bottom,
+          ) - (placement.y ?? 0)
+        );
+      },
+    );
+
+    return shiftY < 0
+      ? this.getShiftedCollisionPlacement(placement, 0, shiftY)
+      : placement;
+  }
+
+  private static tryGetContainedHorizontalCollisionPlacement(
+    fixedBoxes: NoteGlyphBox[],
+    movingBoxes: NoteGlyphBox[],
+    fixedBounds: NoteGlyphBox,
+    clearance: number,
+    initialPlacement: NoteMarkOffset,
+    directions: readonly CollisionShiftDirection[],
+  ): NoteMarkOffset | null {
+    const movingLeft = Math.min(...movingBoxes.map((box) => box.left));
+    const movingRight = Math.max(...movingBoxes.map((box) => box.right));
+    let placement: NoteMarkOffset | null = null;
+    let appliedShiftX: number | undefined;
+
+    for (const direction of directions) {
+      const shiftX = this.getMinimumHorizontalShiftForCollisionBoxes(
+        fixedBoxes,
+        movingBoxes,
+        clearance,
+        direction,
+      );
+
+      if (shiftX === 0) {
+        return initialPlacement;
+      }
+
+      const candidatePlacement = this.getShiftedCollisionPlacement(
+        initialPlacement,
+        shiftX,
+        0,
+      );
+      const candidateAppliedShiftX =
+        (candidatePlacement.x ?? 0) - (initialPlacement.x ?? 0);
+
+      if (
+        movingLeft + candidateAppliedShiftX < fixedBounds.left ||
+        movingRight + candidateAppliedShiftX > fixedBounds.right
+      ) {
+        continue;
+      }
+
+      if (
+        appliedShiftX == null ||
+        Math.abs(candidateAppliedShiftX) < Math.abs(appliedShiftX)
+      ) {
+        placement = candidatePlacement;
+        appliedShiftX = candidateAppliedShiftX;
+      }
+    }
+
+    return placement;
+  }
+
+  private static getMinimumHorizontalShiftForCollisionBoxes(
+    fixedBoxes: NoteGlyphBox[],
+    movingBoxes: NoteGlyphBox[],
+    clearance: number,
+    direction: CollisionShiftDirection,
+  ) {
+    const chooseShift = direction === 'right' ? Math.max : Math.min;
+
+    return this.getMinimumCollisionShift(
+      fixedBoxes,
+      movingBoxes,
+      chooseShift,
+      (fixedBox, movingBox, shiftX) => {
+        const hasInsufficientClearance =
+          this.noteGlyphBoxesVerticallyOverlap(fixedBox, movingBox) &&
+          fixedBox.left - clearance < movingBox.right + shiftX &&
+          movingBox.left + shiftX < fixedBox.right + clearance;
+
+        if (!hasInsufficientClearance) {
+          return null;
+        }
+
+        return direction === 'right'
+          ? fixedBox.right + clearance - movingBox.left
+          : fixedBox.left - clearance - movingBox.right;
+      },
+    );
+  }
+
+  private static getMinimumCollisionShift(
+    fixedBoxes: NoteGlyphBox[],
+    movingBoxes: NoteGlyphBox[],
+    chooseShift: (current: number, candidate: number) => number,
+    getCandidateShift: (
+      fixedBox: NoteGlyphBox,
+      movingBox: NoteGlyphBox,
+      shift: number,
+    ) => number | null,
+  ) {
+    let shift = 0;
+
+    for (let i = 0; i < fixedBoxes.length * movingBoxes.length; i++) {
+      let nextShift = shift;
+
+      for (const fixedBox of fixedBoxes) {
+        for (const movingBox of movingBoxes) {
+          const candidateShift = getCandidateShift(fixedBox, movingBox, shift);
+
+          if (candidateShift != null) {
+            nextShift = chooseShift(nextShift, candidateShift);
+          }
+        }
+      }
+
+      if (nextShift === shift) {
+        break;
+      }
+
+      shift = nextShift;
+    }
+
+    return shift;
+  }
+
+  private static getShiftedCollisionPlacement(
+    placement: NoteMarkOffset,
+    shiftX: number,
+    shiftY: number,
+  ): NoteMarkOffset {
+    return {
+      x:
+        shiftX !== 0
+          ? this.getShiftedCollisionOffset(placement.x, shiftX)
+          : placement.x,
+      y:
+        shiftY !== 0
+          ? this.getShiftedCollisionOffset(placement.y, shiftY)
+          : placement.y,
+    };
+  }
+
+  private static getShiftedCollisionOffset(
+    offset: number | null,
+    shift: number,
+  ): number {
+    const shiftedOffset = (offset ?? 0) + shift;
+
+    // Quantize away from the collision so rounding cannot reintroduce contact.
+    return shift > 0
+      ? Math.ceil(shiftedOffset * fontUnitsPerEm - 1e-9) / fontUnitsPerEm
+      : Math.floor(shiftedOffset * fontUnitsPerEm + 1e-9) / fontUnitsPerEm;
   }
 
   private static getNoteCollisionGlyphBoxes(
@@ -3407,6 +3833,22 @@ export class LayoutService {
     measureBarWidthMap: Map<MeasureBar, number>,
     leftBarReserveOverride: number | null = null,
   ) {
+    const layout = this.getNoteCollisionGlyphLayout(
+      noteElement,
+      pageSetup,
+      measureBarWidthMap,
+      leftBarReserveOverride,
+    );
+
+    return this.getNoteCollisionGlyphBoxesFromLayout(layout);
+  }
+
+  private static getNoteCollisionGlyphLayout(
+    noteElement: NoteElement,
+    pageSetup: PageSetup,
+    measureBarWidthMap: Map<MeasureBar, number>,
+    leftBarReserveOverride: number | null,
+  ): NoteCollisionGlyphLayout {
     const fontFamily = pageSetup.neumeDefaultFontFamily;
     const fontSize = pageSetup.neumeDefaultFontSize;
     const glyphs = this.getNoteCollisionGlyphs(
@@ -3415,37 +3857,65 @@ export class LayoutService {
       measureBarWidthMap,
       leftBarReserveOverride,
     );
+    const glyphNames = glyphs.map((glyph) => glyph.glyphName);
     const resolvedGlyphNames = fontService.resolveContextualSubstitutions(
       fontFamily,
-      glyphs.map((glyph) => glyph.glyphName),
+      glyphNames,
     );
 
     const baseIndex = glyphs.findIndex((glyph) => glyph.kind === 'base');
     const baseGlyphName = resolvedGlyphNames[baseIndex];
 
-    return glyphs.flatMap((glyph, index) => {
-      const glyphName = resolvedGlyphNames[index];
+    return {
+      fontFamily,
+      fontSize,
+      glyphs,
+      resolvedGlyphNames,
+      baseGlyphName,
+    };
+  }
+
+  private static getNoteCollisionGlyphBoxesFromLayout(
+    layout: NoteCollisionGlyphLayout,
+  ) {
+    return layout.glyphs.flatMap((glyph, index) => {
+      const glyphName = layout.resolvedGlyphNames[index];
       let x = glyph.x;
       let y = glyph.y;
 
       if (glyph.kind === 'mark') {
-        const anchorOffset = fontService.getMarkOffset(
-          fontFamily,
-          baseGlyphName,
+        const anchorOffset = fontService.tryGetMarkOffset(
+          layout.fontFamily,
+          layout.baseGlyphName,
           glyphName,
+          glyph.anchorName,
         );
 
-        x += anchorOffset.x * fontSize + this.emToPx(glyph.offsetX, fontSize);
-        y += anchorOffset.y * fontSize + this.emToPx(glyph.offsetY, fontSize);
+        if (anchorOffset == null) {
+          return [];
+        }
+
+        x +=
+          anchorOffset.x * layout.fontSize +
+          this.emToPx(glyph.offsetX, layout.fontSize);
+        y +=
+          anchorOffset.y * layout.fontSize +
+          this.emToPx(glyph.offsetY, layout.fontSize);
       }
 
       return this.getGlyphCollisionBoxes(
-        fontFamily,
+        layout.fontFamily,
         glyphName,
         x,
         y,
-        fontSize,
-      ).map((box) => ({ ...box, collisionKind: glyph.kind }));
+        layout.fontSize,
+      ).map((box) => {
+        return {
+          ...box,
+          collisionKind: glyph.kind,
+          movableMarkKey: glyph.movableMarkKey,
+        };
+      });
     });
   }
 
@@ -3453,7 +3923,7 @@ export class LayoutService {
     noteElement: NoteElement,
     pageSetup: PageSetup,
     measureBarWidthMap: Map<MeasureBar, number>,
-    leftBarReserveOverride: number | null = null,
+    leftBarReserveOverride: number | null,
   ): NoteCollisionGlyph[] {
     const glyphs: NoteCollisionGlyph[] = [];
     const fontSize = pageSetup.neumeDefaultFontSize;
@@ -3482,7 +3952,7 @@ export class LayoutService {
       y: 0,
     });
 
-    for (const mark of this.getNoteCollisionMarks(noteElement)) {
+    for (const mark of this.getNoteCollisionMarks(noteElement, pageSetup)) {
       glyphs.push({
         glyphName: NeumeMappingService.getMapping(mark.neume).glyphName,
         kind: 'mark',
@@ -3490,6 +3960,8 @@ export class LayoutService {
         y: 0,
         offsetX: mark.offsetX,
         offsetY: mark.offsetY,
+        anchorName: mark.anchorName,
+        movableMarkKey: mark.movableMarkKey,
       });
     }
 
@@ -3605,29 +4077,31 @@ export class LayoutService {
     );
   }
 
-  private static getNoteCollisionMarks(noteElement: NoteElement) {
-    const marks: Array<{
-      neume: Neume;
-      offsetX?: number | null;
-      offsetY?: number | null;
-    }> = [];
+  private static getNoteCollisionMarks(
+    noteElement: NoteElement,
+    pageSetup: PageSetup,
+  ) {
+    const marks: NoteCollisionMark[] = [];
 
     const add = (
-      neume: Neume | null | undefined,
-      offsetX?: number | null,
-      offsetY?: number | null,
+      neume: Neume | null,
+      offsetX: number | null,
+      offsetY: number | null,
+      options: NoteCollisionMarkOptions = {},
     ) => {
-      if (neume != null && !isTieNeume(neume)) {
-        marks.push({ neume, offsetX, offsetY });
+      if (neume == null || isTieNeume(neume)) {
+        return;
       }
+
+      marks.push({ neume, offsetX, offsetY, ...options });
     };
 
     for (const slot of noteMarkSlots) {
-      add(
-        slot.neume(noteElement),
-        slot.offsetX(noteElement),
-        slot.offsetY(noteElement),
-      );
+      const offset = slot.offset(noteElement);
+      add(slot.neume(noteElement), offset.x, offset.y, {
+        anchorName: slot.anchorName,
+        movableMarkKey: slot.movableMarkKey,
+      });
     }
 
     const measureBarLeft =
@@ -3635,7 +4109,9 @@ export class LayoutService {
     if (isMeasureBarAboveVariant(measureBarLeft)) {
       add(
         measureBarLeft,
-        noteElement.measureBarLeftOffsetX,
+        (noteElement.measureBarLeftOffsetX ?? 0) +
+          noteElement.computedMeasureBarLeftOffsetX /
+            pageSetup.neumeDefaultFontSize,
         noteElement.measureBarLeftOffsetY,
       );
     }
@@ -4930,6 +5406,8 @@ export class LayoutService {
       note.fthoraPrevious = note.fthora;
       note.secondaryFthoraPrevious = note.secondaryFthora;
       note.tertiaryFthoraPrevious = note.tertiaryFthora;
+      note.koronisPrevious = note.koronis;
+      note.isonPrevious = note.ison;
       note.computedMeasureBarLeftPrevious = note.computedMeasureBarLeft;
       note.computedMeasureBarRightPrevious = note.computedMeasureBarRight;
       note.computedMeasureBarLeftOffsetXPrevious =
@@ -4940,6 +5418,19 @@ export class LayoutService {
         note.computedMeasureBarLeftLeadingSpacing;
       note.computedMeasureBarRightTrailingSpacingPrevious =
         note.computedMeasureBarRightTrailingSpacing;
+      note.computedFthoraOffsetXPrevious = note.computedFthoraOffsetX;
+      note.computedFthoraOffsetYPrevious = note.computedFthoraOffsetY;
+      note.computedSecondaryFthoraOffsetXPrevious =
+        note.computedSecondaryFthoraOffsetX;
+      note.computedSecondaryFthoraOffsetYPrevious =
+        note.computedSecondaryFthoraOffsetY;
+      note.computedTertiaryFthoraOffsetXPrevious =
+        note.computedTertiaryFthoraOffsetX;
+      note.computedTertiaryFthoraOffsetYPrevious =
+        note.computedTertiaryFthoraOffsetY;
+      note.computedKoronisOffsetXPrevious = note.computedKoronisOffsetX;
+      note.computedKoronisOffsetYPrevious = note.computedKoronisOffsetY;
+      note.computedIsonOffsetXPrevious = note.computedIsonOffsetX;
       note.computedIsonOffsetYPrevious = note.computedIsonOffsetY;
       note.vareiaInternalSpacingPrevious = note.vareiaInternalSpacing;
     } else if (element.elementType === ElementType.TextBox) {
@@ -5025,6 +5516,8 @@ export class LayoutService {
         note.fthoraPrevious !== note.fthora ||
         note.secondaryFthoraPrevious !== note.secondaryFthora ||
         note.tertiaryFthoraPrevious !== note.tertiaryFthora ||
+        note.koronisPrevious !== note.koronis ||
+        note.isonPrevious !== note.ison ||
         note.computedMeasureBarLeftPrevious !== note.computedMeasureBarLeft ||
         note.computedMeasureBarRightPrevious !== note.computedMeasureBarRight ||
         note.computedMeasureBarLeftOffsetXPrevious !==
@@ -5035,6 +5528,19 @@ export class LayoutService {
           note.computedMeasureBarLeftLeadingSpacing ||
         note.computedMeasureBarRightTrailingSpacingPrevious !==
           note.computedMeasureBarRightTrailingSpacing ||
+        note.computedFthoraOffsetXPrevious !== note.computedFthoraOffsetX ||
+        note.computedFthoraOffsetYPrevious !== note.computedFthoraOffsetY ||
+        note.computedSecondaryFthoraOffsetXPrevious !==
+          note.computedSecondaryFthoraOffsetX ||
+        note.computedSecondaryFthoraOffsetYPrevious !==
+          note.computedSecondaryFthoraOffsetY ||
+        note.computedTertiaryFthoraOffsetXPrevious !==
+          note.computedTertiaryFthoraOffsetX ||
+        note.computedTertiaryFthoraOffsetYPrevious !==
+          note.computedTertiaryFthoraOffsetY ||
+        note.computedKoronisOffsetXPrevious !== note.computedKoronisOffsetX ||
+        note.computedKoronisOffsetYPrevious !== note.computedKoronisOffsetY ||
+        note.computedIsonOffsetXPrevious !== note.computedIsonOffsetX ||
         note.computedIsonOffsetYPrevious !== note.computedIsonOffsetY ||
         note.vareiaInternalSpacingPrevious !== note.vareiaInternalSpacing;
     }
@@ -7360,38 +7866,302 @@ export class LayoutService {
         const notes = line.elements.filter(
           (x) => x.elementType === ElementType.Note,
         ) as NoteElement[];
-        const notesWithIson = notes.filter((x) => x.ison != null);
+        const adjustments: Array<{
+          note: NoteElement;
+          referenceOffsetY: number;
+          authoredOffset: NoteMarkOffset;
+        }> = [];
 
         // The minOffset represents the highest position in this coordinate system.
         // 0 is the default position, positive moves down, negative moves up.
-        let minOffset = Number.MAX_VALUE;
+        let minOffset = Number.POSITIVE_INFINITY;
 
-        for (const note of notesWithIson) {
-          const base = NeumeMappingService.getMapping(note.quantitativeNeume);
-          const mark = NeumeMappingService.getMapping(note.ison!);
-          const offset = fontService.getMarkAnchorOffset(
-            pageSetup.neumeDefaultFontFamily,
-            base.glyphName,
-            mark.glyphName,
-          );
+        for (const note of notes) {
+          const ison = note.ison;
 
-          const totalOffset = offset.y + (note.isonOffsetY ?? 0);
-
-          if (totalOffset < minOffset) {
-            minOffset = totalOffset;
+          if (ison == null) {
+            continue;
           }
 
-          note.isonOffsetYBeforeAdjustment = totalOffset;
+          const layout = this.getNoteMarkCollisionGlyphLayout(note, pageSetup);
+          const markGlyphName = NeumeMappingService.getMapping(ison).glyphName;
+          const referenceOffsetY = fontService.getMarkAnchorOffset(
+            layout.fontFamily,
+            layout.baseGlyphName,
+            markGlyphName,
+            isonIndicatorAnchorName,
+          ).y;
+          const authoredOffset = getAuthoredNoteMarkOffset(note, 'ison');
+
+          adjustments.push({ note, referenceOffsetY, authoredOffset });
+
+          minOffset = Math.min(
+            minOffset,
+            referenceOffsetY + (authoredOffset.y ?? 0),
+          );
         }
 
-        for (const note of notesWithIson) {
-          note.computedIsonOffsetY =
-            minOffset -
-            note.isonOffsetYBeforeAdjustment +
-            (note.isonOffsetY ?? 0);
+        for (const { note, referenceOffsetY, authoredOffset } of adjustments) {
+          setComputedNoteMarkOffset(note, 'ison', {
+            x: authoredOffset.x,
+            y: minOffset - referenceOffsetY,
+          });
         }
       }
     }
+  }
+
+  private static resolveNoteMarkCollisionsForElements(
+    elements: ScoreElement[],
+    pageSetup: PageSetup,
+    alignIsonIndicators: boolean,
+  ) {
+    if (alignIsonIndicators) {
+      this.resolveAlignedIsonNoteMarkCollisionsForElements(elements, pageSetup);
+      return;
+    }
+
+    for (const element of elements) {
+      if (element.elementType === ElementType.Note) {
+        this.resolveNoteMarkCollisionsForNote(
+          element as NoteElement,
+          pageSetup,
+        );
+      }
+    }
+  }
+
+  private static resolveAlignedIsonNoteMarkCollisionsForElements(
+    elements: ScoreElement[],
+    pageSetup: PageSetup,
+  ) {
+    const isonSpec = this.getMovableMarkSpec('ison');
+    const notesWithIson: NoteElement[] = [];
+
+    for (const element of elements) {
+      if (element.elementType !== ElementType.Note) {
+        continue;
+      }
+
+      const note = element as NoteElement;
+
+      this.resolveNoteMarkCollisionsForNote(note, pageSetup, true);
+
+      if (note.ison != null) {
+        notesWithIson.push(note);
+      }
+    }
+
+    // A shared move can carry another ison out of its gap into an obstacle.
+    // Keep moving the aligned group upward until every note has room.
+    while (true) {
+      let commonIsonShiftY = 0;
+
+      for (const note of notesWithIson) {
+        const context = this.getNoteMarkCollisionContext(
+          note,
+          pageSetup,
+          alignedIsonFixedMovableMarkKeys,
+        );
+        const placement = this.getMovableNoteMarkPlacement(
+          note,
+          isonSpec,
+          context,
+        );
+
+        commonIsonShiftY = Math.min(commonIsonShiftY, placement.shiftY);
+      }
+
+      if (commonIsonShiftY === 0) {
+        break;
+      }
+
+      for (const note of notesWithIson) {
+        const offset = getEffectiveNoteMarkOffset(note, 'ison');
+
+        setComputedNoteMarkOffset(note, 'ison', {
+          x: null,
+          y: this.getShiftedCollisionOffset(offset.y, commonIsonShiftY),
+        });
+      }
+    }
+
+    for (const note of notesWithIson) {
+      const context = this.getNoteMarkCollisionContext(
+        note,
+        pageSetup,
+        alignedIsonFixedMovableMarkKeys,
+      );
+
+      this.placeMovableNoteMark(note, isonSpec, context, false);
+    }
+  }
+
+  private static resolveNoteMarkCollisionsForNote(
+    noteElement: NoteElement,
+    pageSetup: PageSetup,
+    isonHandledSeparately = false,
+  ) {
+    // In the aligned-ison flow the computed ison offset Y carries the
+    // line-wide alignment computed by alignIsonIndicators, so it survives
+    // the reset and ison is placed by the caller after the other marks.
+    const preservedComputedIsonOffsetY =
+      isonHandledSeparately && noteElement.ison != null
+        ? noteElement.computedIsonOffsetY
+        : null;
+
+    this.resetComputedNoteMarkOffsets(noteElement);
+    noteElement.computedIsonOffsetY = preservedComputedIsonOffsetY;
+
+    let context: NoteMarkCollisionContext | null = null;
+
+    for (const spec of movableMarkSpecs) {
+      if (
+        (isonHandledSeparately && spec.key === 'ison') ||
+        spec.getNeume(noteElement) == null
+      ) {
+        continue;
+      }
+
+      context ??= this.getNoteMarkCollisionContext(noteElement, pageSetup);
+      this.placeMovableNoteMark(noteElement, spec, context);
+    }
+  }
+
+  private static getNoteMarkCollisionContext(
+    noteElement: NoteElement,
+    pageSetup: PageSetup,
+    fixedMovableMarkKeys?: ReadonlySet<MovableMarkKey>,
+  ): NoteMarkCollisionContext {
+    const layout = this.getNoteMarkCollisionGlyphLayout(noteElement, pageSetup);
+    const collisionBoxes = this.getNoteCollisionGlyphBoxesFromLayout(
+      layout,
+    ).map((box) => this.noteGlyphBoxToEm(box, layout.fontSize));
+    const fixedBoxes = collisionBoxes.filter(
+      (box) =>
+        box.movableMarkKey == null ||
+        fixedMovableMarkKeys?.has(box.movableMarkKey),
+    );
+    const baseGlyph = layout.glyphs.find((glyph) => glyph.kind === 'base')!;
+    const baseBounds = this.noteGlyphBoxToEm(
+      this.getGlyphBox(
+        layout.fontFamily,
+        layout.baseGlyphName,
+        baseGlyph.x,
+        baseGlyph.y,
+        layout.fontSize,
+      ),
+      layout.fontSize,
+    );
+
+    return {
+      collisionBoxes,
+      fixedBoxes,
+      baseBounds,
+    };
+  }
+
+  private static getNoteMarkCollisionGlyphLayout(
+    noteElement: NoteElement,
+    pageSetup: PageSetup,
+  ) {
+    // Mark collisions are resolved in note-local coordinates, so measure bar
+    // reserves are excluded from the layout.
+    return this.getNoteCollisionGlyphLayout(
+      noteElement,
+      pageSetup,
+      emptyMeasureBarWidthMap,
+      0,
+    );
+  }
+
+  // Movable mark offsets are authored and rendered in em units, so the
+  // collision solver works in em units. Collision boxes are computed in
+  // pixels at the page's neume font size and converted at this boundary.
+  private static noteGlyphBoxToEm(
+    box: NoteGlyphBox,
+    fontSize: number,
+  ): NoteGlyphBox {
+    return {
+      ...box,
+      left: box.left / fontSize,
+      right: box.right / fontSize,
+      top: box.top / fontSize,
+      bottom: box.bottom / fontSize,
+    };
+  }
+
+  private static placeMovableNoteMark(
+    noteElement: NoteElement,
+    spec: MovableMarkSpec,
+    context: NoteMarkCollisionContext,
+    allowVerticalShift = true,
+  ) {
+    const placement = this.getMovableNoteMarkPlacement(
+      noteElement,
+      spec,
+      context,
+      allowVerticalShift,
+    );
+
+    const authoredOffset = getAuthoredNoteMarkOffset(noteElement, spec.key);
+    setComputedNoteMarkOffset(noteElement, spec.key, {
+      x:
+        placement.finalOffset.x !== authoredOffset.x
+          ? placement.finalOffset.x
+          : null,
+      y:
+        placement.finalOffset.y !== authoredOffset.y
+          ? placement.finalOffset.y
+          : null,
+    });
+
+    context.fixedBoxes.push(
+      ...placement.markBoxes.map((box) => ({
+        ...box,
+        left: box.left + placement.shiftX,
+        right: box.right + placement.shiftX,
+        top: box.top + placement.shiftY,
+        bottom: box.bottom + placement.shiftY,
+      })),
+    );
+  }
+
+  private static getMovableNoteMarkPlacement(
+    noteElement: NoteElement,
+    spec: MovableMarkSpec,
+    context: NoteMarkCollisionContext,
+    allowVerticalShift = true,
+  ): MovableMarkPlacement {
+    const initialPlacement = getEffectiveNoteMarkOffset(noteElement, spec.key);
+    const markBoxes = context.collisionBoxes.filter(
+      (box) => box.movableMarkKey === spec.key,
+    );
+    const finalOffset = this.resolveMovableCollisionPlacement(
+      initialPlacement,
+      markBoxes,
+      spec.getHorizontalDirections(noteElement),
+      spec.horizontalClearance,
+      context,
+      allowVerticalShift,
+    );
+
+    return {
+      finalOffset,
+      markBoxes,
+      shiftX: (finalOffset.x ?? 0) - (initialPlacement.x ?? 0),
+      shiftY: (finalOffset.y ?? 0) - (initialPlacement.y ?? 0),
+    };
+  }
+
+  private static resetComputedNoteMarkOffsets(noteElement: NoteElement) {
+    for (const spec of movableMarkSpecs) {
+      setComputedNoteMarkOffset(noteElement, spec.key, { x: null, y: null });
+    }
+  }
+
+  private static getMovableMarkSpec(markKey: MovableMarkKey) {
+    return movableMarkSpecsByKey.get(markKey)!;
   }
 
   private static getRootSign(
@@ -8261,86 +9031,86 @@ const noteFthoraSlots: Array<{
   },
 ];
 
+function createMovableNoteMarkSlot(markKey: MovableMarkKey): NoteMarkSlot {
+  return {
+    neume: movableMarkSpecsByKey.get(markKey)!.getNeume,
+    offset: (note) => getEffectiveNoteMarkOffset(note, markKey),
+    movableMarkKey: markKey,
+  };
+}
+
 // The ordered list of optional marks shared by the shaped-width and collision
 // paths. Each path adds or excludes its own special cases separately.
-const noteMarkSlots: Array<{
-  neume: (note: NoteElement) => Neume | null;
-  offsetX: (note: NoteElement) => number | null;
-  offsetY: (note: NoteElement) => number | null;
-}> = [
+const noteMarkSlots: readonly NoteMarkSlot[] = [
   {
     neume: (note) => (note.stavros ? VocalExpressionNeume.Cross_Top : null),
-    offsetX: (note) => note.stavrosOffsetX,
-    offsetY: (note) => note.stavrosOffsetY,
+    offset: (note) => ({ x: note.stavrosOffsetX, y: note.stavrosOffsetY }),
   },
   {
     neume: (note) => note.vocalExpressionNeume,
-    offsetX: (note) => note.vocalExpressionNeumeOffsetX,
-    offsetY: (note) => note.vocalExpressionNeumeOffsetY,
+    offset: (note) => ({
+      x: note.vocalExpressionNeumeOffsetX,
+      y: note.vocalExpressionNeumeOffsetY,
+    }),
   },
   {
     neume: (note) => note.timeNeume,
-    offsetX: (note) => note.timeNeumeOffsetX,
-    offsetY: (note) => note.timeNeumeOffsetY,
+    offset: (note) => ({ x: note.timeNeumeOffsetX, y: note.timeNeumeOffsetY }),
   },
-  {
-    neume: (note) => (note.koronis ? TimeNeume.Koronis : null),
-    offsetX: (note) => note.koronisOffsetX,
-    offsetY: (note) => note.koronisOffsetY,
-  },
+  createMovableNoteMarkSlot('koronis'),
   {
     neume: (note) => note.gorgonNeume,
-    offsetX: (note) => note.gorgonNeumeOffsetX,
-    offsetY: (note) => note.gorgonNeumeOffsetY,
+    offset: (note) => ({
+      x: note.gorgonNeumeOffsetX,
+      y: note.gorgonNeumeOffsetY,
+    }),
+    anchorName: gorgonTopAnchorName,
   },
   {
     neume: (note) => note.secondaryGorgonNeume,
-    offsetX: (note) => note.secondaryGorgonNeumeOffsetX,
-    offsetY: (note) => note.secondaryGorgonNeumeOffsetY,
+    offset: (note) => ({
+      x: note.secondaryGorgonNeumeOffsetX,
+      y: note.secondaryGorgonNeumeOffsetY,
+    }),
+    anchorName: gorgonSecondaryAnchorName,
   },
-  {
-    neume: (note) => note.fthora,
-    offsetX: (note) => note.fthoraOffsetX,
-    offsetY: (note) => note.fthoraOffsetY,
-  },
-  {
-    neume: (note) => note.secondaryFthora,
-    offsetX: (note) => note.secondaryFthoraOffsetX,
-    offsetY: (note) => note.secondaryFthoraOffsetY,
-  },
-  {
-    neume: (note) => note.tertiaryFthora,
-    offsetX: (note) => note.tertiaryFthoraOffsetX,
-    offsetY: (note) => note.tertiaryFthoraOffsetY,
-  },
+  createMovableNoteMarkSlot('fthora'),
+  createMovableNoteMarkSlot('secondaryFthora'),
+  createMovableNoteMarkSlot('tertiaryFthora'),
   {
     neume: (note) => note.accidental,
-    offsetX: (note) => note.accidentalOffsetX,
-    offsetY: (note) => note.accidentalOffsetY,
+    offset: (note) => ({
+      x: note.accidentalOffsetX,
+      y: note.accidentalOffsetY,
+    }),
   },
   {
     neume: (note) => note.secondaryAccidental,
-    offsetX: (note) => note.secondaryAccidentalOffsetX,
-    offsetY: (note) => note.secondaryAccidentalOffsetY,
+    offset: (note) => ({
+      x: note.secondaryAccidentalOffsetX,
+      y: note.secondaryAccidentalOffsetY,
+    }),
   },
   {
     neume: (note) => note.tertiaryAccidental,
-    offsetX: (note) => note.tertiaryAccidentalOffsetX,
-    offsetY: (note) => note.tertiaryAccidentalOffsetY,
+    offset: (note) => ({
+      x: note.tertiaryAccidentalOffsetX,
+      y: note.tertiaryAccidentalOffsetY,
+    }),
   },
   {
     neume: (note) => (note.noteIndicator ? note.noteIndicatorNeume : null),
-    offsetX: (note) => note.noteIndicatorOffsetX,
-    offsetY: (note) => note.noteIndicatorOffsetY,
+    offset: (note) => ({
+      x: note.noteIndicatorOffsetX,
+      y: note.noteIndicatorOffsetY,
+    }),
   },
-  {
-    neume: (note) => note.ison,
-    offsetX: (note) => note.isonOffsetX,
-    offsetY: (note) => note.computedIsonOffsetY,
-  },
+  createMovableNoteMarkSlot('ison'),
   {
     neume: (note) => note.measureNumber,
-    offsetX: (note) => note.measureNumberOffsetX,
-    offsetY: (note) => note.measureNumberOffsetY,
+    offset: (note) => ({
+      x: note.measureNumberOffsetX,
+      y: note.measureNumberOffsetY,
+    }),
   },
 ];
