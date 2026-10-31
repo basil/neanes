@@ -1377,9 +1377,9 @@ async function printWorkspace(args: PrintWorkspaceArgs) {
       preload,
       entry: path.join(process.env.DIST!, 'export.html'),
       devServerUrl: url,
-      complete: (window) =>
+      complete: ({ webContents }) =>
         new Promise<{ success: boolean; failureReason: string }>((resolve) => {
-          window.webContents.print(
+          webContents.print(
             {
               pageSize: getNativePrintPageSize(args),
               landscape: args.landscape,

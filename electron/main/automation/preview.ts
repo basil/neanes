@@ -70,7 +70,7 @@ export async function renderPagePreview(options: {
       });
       return true;
     },
-    complete: async (_window, result) => {
+    complete: async (_renderer, result) => {
       options.signal.throwIfAborted();
       return { image, pageCount: result.pageCount };
     },

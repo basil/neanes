@@ -102,10 +102,9 @@ export async function checkPdfSettling(options: {
   const measured = await renderSnapshot({
     ...shared,
     snapshot,
-    async complete(window) {
+    async complete({ webContents }) {
       // Read the actual export DOM at the production readiness boundary.
-      const pages: BoxGeometry[][] = await window.webContents
-        .executeJavaScript(`
+      const pages: BoxGeometry[][] = await webContents.executeJavaScript(`
         [...document.querySelectorAll('.page')].map(page => {
           const origin = page.getBoundingClientRect().top;
           return [...page.querySelectorAll('.text-box-container, .rich-text-box-container')].map(box => {
@@ -147,7 +146,7 @@ export async function checkPdfSettling(options: {
       return {
         pages,
         bodies,
-        pdf: await window.webContents.printToPDF({
+        pdf: await webContents.printToPDF({
           pageSize: 'Letter',
           landscape: false,
           printBackground: false,

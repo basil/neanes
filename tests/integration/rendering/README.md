@@ -25,7 +25,9 @@ rich-text/RTL content, partial cancellation, file-write failure and recovery, an
 snapshot immutability. PNG artifacts are retained beside the PDFs.
 
 Native-print checks verify settled page geometry, canonical zoom, document title,
-parent-window association, source snapshot preservation, and renderer cleanup.
+a hidden renderer view owned by the editor with no extra window, view removal and
+renderer disposal, cancellation when the editor closes, and source snapshot
+preservation.
 `native-print-prepared.pdf` captures the prepared pages without sending a print
 job. Unit tests cover named paper and inch-to-micron conversion for custom and
 half-size paper.
@@ -35,6 +37,14 @@ orientation, cancellation/retry, and a physical print or system Save as PDF.
 Leave the dialog open for more than 45 seconds to verify that choosing printer
 settings is not subject to the rendering deadline. PNG overwrite, skip, and
 cancel prompts should retain their existing behavior.
+
+Native printing on every platform uses a separate renderer in a hidden
+WebContentsView attached to the editor. This gives the dialog the editor's native
+parent without changing the editor's content or creating another native window.
+On each platform, including a native Wayland session on Linux, also print a new
+score via File > Print, cancel, and retry. Verify that the dialog is modal to the
+editor, no additional score window appears, and the editor remains unchanged after
+cancellation or completion.
 
 On macOS, agents must run this command outside their command sandbox, as described
 in AGENTS.md. It does not disable Electron's security sandbox.

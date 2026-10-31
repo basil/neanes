@@ -1,4 +1,10 @@
-import { BrowserWindow, ipcMain, type IpcMainEvent } from 'electron';
+import {
+  BrowserWindow,
+  ipcMain,
+  type IpcMainEvent,
+  type WebContents,
+  WebContentsView,
+} from 'electron';
 
 import {
   IpcMainChannels,
@@ -9,6 +15,45 @@ import type {
   ScoreRenderSnapshot,
   SnapshotRenderResult,
 } from '../../../src/services/rendering/scoreRenderSnapshot';
+
+// Pairs a renderer's webContents with the teardown for whatever hosts it.
+function createRendererHost(
+  parent: BrowserWindow | undefined,
+  attachToParent: boolean,
+  webPreferences: Electron.WebPreferences,
+) {
+  if (attachToParent && parent) {
+    // A hidden view attached to the editor keeps rendering separate while
+    // giving native print dialogs the editor's mapped native surface as their
+    // parent.
+    const view = new WebContentsView({ webPreferences });
+    // The view drops its webContents reference once it is destroyed, so keep
+    // our own for disposal.
+    const { webContents } = view;
+    view.setVisible(false);
+    parent.contentView.addChildView(view);
+    return {
+      webContents,
+      dispose() {
+        if (!parent.isDestroyed()) {
+          parent.contentView.removeChildView(view);
+        }
+        if (!webContents.isDestroyed()) {
+          webContents.close();
+        }
+      },
+    };
+  }
+  const window = new BrowserWindow({ show: false, parent, webPreferences });
+  return {
+    webContents: window.webContents,
+    dispose() {
+      if (!window.isDestroyed()) {
+        window.destroy();
+      }
+    },
+  };
+}
 
 // One disposable renderer per snapshot. It has no editor/workspace lifecycle.
 export async function renderSnapshot<T>(options: {
@@ -22,7 +67,7 @@ export async function renderSnapshot<T>(options: {
     signal: AbortSignal,
   ) => Promise<boolean>;
   complete: (
-    window: BrowserWindow,
+    renderer: { webContents: WebContents },
     result: Extract<SnapshotRenderResult, { success: true }>,
   ) => Promise<T>;
   preload: string;
@@ -31,18 +76,19 @@ export async function renderSnapshot<T>(options: {
   signal: AbortSignal;
 }): Promise<T> {
   options.signal.throwIfAborted();
-  const window = new BrowserWindow({
-    show: false,
-    parent: options.parent,
-    webPreferences: {
+  const host = createRendererHost(
+    options.parent,
+    options.completeHasDialog === true,
+    {
       preload: options.preload,
       contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,
       spellcheck: false,
     },
-  });
-  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  );
+  const { webContents } = host;
+  webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   const outcome = Promise.withResolvers<T>();
   const rendering = new AbortController();
   let started = false;
@@ -54,7 +100,7 @@ export async function renderSnapshot<T>(options: {
     outcome.reject(error);
   };
   const onReady = (event: IpcMainEvent) => {
-    if (event.sender === window.webContents && !started) {
+    if (event.sender === webContents && !started) {
       started = true;
       event.sender.send(IpcMainChannels.ExportRendererSnapshot, {
         snapshot: options.snapshot,
@@ -63,7 +109,7 @@ export async function renderSnapshot<T>(options: {
     }
   };
   const onResult = (event: IpcMainEvent, result: SnapshotRenderResult) => {
-    if (event.sender !== window.webContents || !started || completing) {
+    if (event.sender !== webContents || !started || completing) {
       return;
     }
     completing = true;
@@ -76,7 +122,7 @@ export async function renderSnapshot<T>(options: {
       clearTimeout(timer);
     }
     void Promise.resolve()
-      .then(() => options.complete(window, result))
+      .then(() => options.complete({ webContents }, result))
       .then(outcome.resolve, (error: unknown) => fail(String(error)));
   };
   const onAbort = () => {
@@ -97,7 +143,7 @@ export async function renderSnapshot<T>(options: {
   };
   const owner = options.parent?.webContents;
   let timer = setTimeout(() => fail('Renderer timed out'), 45_000);
-  window.webContents.ipc.handle(
+  webContents.ipc.handle(
     IpcRendererChannels.ExportRendererImage,
     async (_event, pageNumber: number, data: string) => {
       if (!started || !options.writeImage) {
@@ -119,9 +165,9 @@ export async function renderSnapshot<T>(options: {
   ipcMain.on(IpcRendererChannels.ExportRendererReady, onReady);
   ipcMain.on(IpcRendererChannels.ExportRendererResult, onResult);
   options.signal.addEventListener('abort', onAbort, { once: true });
-  window.webContents.on('render-process-gone', onGone);
-  window.webContents.on('will-navigate', onNavigation);
-  window.on('closed', onGone);
+  webContents.on('render-process-gone', onGone);
+  webContents.on('will-navigate', onNavigation);
+  webContents.on('destroyed', onGone);
   owner?.on('destroyed', onGone);
   owner?.on('render-process-gone', onGone);
   owner?.on('did-start-navigation', onOwnerNavigation);
@@ -129,8 +175,8 @@ export async function renderSnapshot<T>(options: {
     // Start loading without delaying observation of crashes or cancellation.
     void (
       options.devServerUrl
-        ? window.loadURL(new URL('export.html', options.devServerUrl).href)
-        : window.loadFile(options.entry)
+        ? webContents.loadURL(new URL('export.html', options.devServerUrl).href)
+        : webContents.loadFile(options.entry)
     ).catch((error: unknown) => fail(String(error)));
     return await outcome.promise;
   } finally {
@@ -139,17 +185,13 @@ export async function renderSnapshot<T>(options: {
     ipcMain.removeListener(IpcRendererChannels.ExportRendererReady, onReady);
     ipcMain.removeListener(IpcRendererChannels.ExportRendererResult, onResult);
     options.signal.removeEventListener('abort', onAbort);
-    if (!window.isDestroyed()) {
-      window.webContents.ipc.removeHandler(
-        IpcRendererChannels.ExportRendererImage,
-      );
+    if (!webContents.isDestroyed()) {
+      webContents.ipc.removeHandler(IpcRendererChannels.ExportRendererImage);
     }
-    window.removeListener('closed', onGone);
+    webContents.removeListener('destroyed', onGone);
     owner?.removeListener('destroyed', onGone);
     owner?.removeListener('render-process-gone', onGone);
     owner?.removeListener('did-start-navigation', onOwnerNavigation);
-    if (!window.isDestroyed()) {
-      window.destroy();
-    }
+    host.dispose();
   }
 }
